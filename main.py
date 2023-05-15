@@ -5,8 +5,10 @@ import http.client
 import time
 import json
 import socket
-import threading
 import random
+
+from server import Server
+from client import Client
 
 ### CONSTANTS ###
 #               #
@@ -33,155 +35,6 @@ SUITS   = [ 'Clubs', 'Spades', 'Hearts', 'Diamonds' ]
 
 ### OBJECTS ###
 #             #
-class Peer:
-    def __init__(self):
-        self.sock = None
-        self.host = socket.gethostname()
-        self.port = 0
-        self.player_sockets = list()
-        
-        
-    def host_lobby(self):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.bind((self.host, self.port))
-        self.port = self.sock.getsockname()[1]
-        self.player_sockets.append((self.host, self.port))
-        self.sock.listen(NUM_PLAYERS - 1)
-        print(socket.gethostbyname(self.host) + ':' + str(self.port))
-        
-        print('Waiting for players...')
-        
-        # Register with the name server
-        self.register()
-        
-        while len(self.player_sockets) < NUM_PLAYERS:
-            client_sock, client_addr = self.sock.accept()
-            self.player_sockets.append(client_sock)
-            message = self.get_message(client_sock)
-            print(message['name'] + ' joined')
-            self.register(0)
-        
-        
-    def register(self, timer=1):
-        if timer == 1:
-            threading.Timer(PING_INTERVAL, self.register).start()
-        
-        udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        udp_socket.sendto(json.dumps({'type': ENTRY_TYPE, 'owner': os.getlogin(), 'port': self.port, 'players': len(self.player_sockets)}).encode(), (CATALOG_SERVER[:-5], int(CATALOG_SERVER[-4:])))
-        udp_socket.close()
-        
-        
-    def broadcast_message(self, message):
-        for player_sock in self.player_sockets[1:]:
-            try:
-                player_sock.sendall(message)
-            except:
-                del self.player_sockets[1:]
-                return 0
-        
-        return 1
-        
-        
-    def get_message(self, player_sock):
-        try:
-            # Get message size
-            message_size = int.from_bytes(player_sock.recv(8), 'big')
-            
-            # Get message
-            message = ''
-            bytes_read = 0
-            while bytes_read < message_size:
-                message += player_sock.recv(min(READ_BLOCK_SIZE, message_size - bytes_read)).decode()
-                bytes_read += min(READ_BLOCK_SIZE, message_size - bytes_read)
-                
-            return json.loads(message)
-        
-        except:
-            self.disconnect()
-        
-        
-class Client:
-    def __init__(self):
-        self.sock = None
-        self.addr = None
-        self.port = None
-        
-        
-    # Retrieves list of lobbies
-    def lookup(self):
-        
-        lobbies = list()
-        
-        # Get catalog
-        http_conn = http.client.HTTPConnection(CATALOG_SERVER)
-        http_conn.request('GET', '/query.json')
-        
-        # Parse catalog
-        catalog = json.loads(http_conn.getresponse().read())
-        http_conn.close()
-        
-        # Iterate through catalog
-        for entry in catalog:
-            
-            # If the entry dict has the necessary keys
-            if all(key in entry for key in ('type', 'address', 'port', 'lastheardfrom', 'owner', 'players')):
-                
-                # If the entry is an open lobby
-                if entry['type'] == ENTRY_TYPE and entry['lastheardfrom'] >= time.time_ns() / 1000000000.0 - PING_INTERVAL and int(entry['players']) < NUM_PLAYERS:
-                    
-                    if entry not in lobbies:
-                        lobbies.append(entry)
-        
-        return lobbies
-        
-        
-    def connect(self, addr, port):
-        try:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.connect((addr, port))
-            self.addr = addr
-            self.port = port
-            
-            return 1
-        except:
-            self.disconnect()
-        
-        
-    def disconnect(self):
-        self.sock.close()
-        self.addr = None
-        self.port = None
-        
-        
-    def send_message(self, message):
-        try:
-            message_size = len(message.encode()).to_bytes(8, 'big')
-            self.sock.sendall(message_size + message.encode())
-            return 1
-            
-        except:
-            self.disconnect()
-            return 0
-        
-        
-    def get_message(self):
-        try:
-            # Get message size
-            message_size = int.from_bytes(self.sock.recv(8), 'big')
-            
-            # Get message
-            message = ''
-            bytes_read = 0
-            while bytes_read < message_size:
-                message += self.sock.recv(min(READ_BLOCK_SIZE, message_size - bytes_read)).decode()
-                bytes_read += min(READ_BLOCK_SIZE, message_size - bytes_read)
-                
-            return json.loads(message)
-        
-        except:
-            self.disconnect()
-        
-        
 class Card:
     def __init__(self, rank, suit):
         self.rank = rank
@@ -238,7 +91,7 @@ class Player:
 
 ### GLOBALS ###
 #             #
-peer = Peer()
+server = Server()
 
 client = Client()
 
@@ -274,16 +127,15 @@ def menu():
     
 # Host a lobby
 def hostLobby():
-    global peer, identity, CURR_STATE
+    global server, identity, CURR_STATE
     
     # Host lobby
-    peer.host_lobby()
+    server.host_lobby()
     
     # Broadcast to players that game is ready!
-    message = str(json.dumps({'ready': '1'})).encode()
-    message_size = len(message).to_bytes(8, 'big')
+    message = str(json.dumps({'ready': '1'}))
     
-    if peer.broadcast_message(message_size + message) == 0:
+    if server.broadcast_message(message) == 0:
         CURR_STATE = 'QUIT'
         return
     
@@ -292,6 +144,7 @@ def hostLobby():
     CURR_STATE = 'SETUP'
     
     
+    message_size = len(message).to_bytes(8, 'big')
 # Join a lobby
 def joinLobby():
     global client, identity, CURR_STATE
@@ -342,16 +195,15 @@ def joinLobby():
     
     
 def setup():
-    global peer, client, identity, CURR_STATE
+    global server, client, identity, CURR_STATE
     
     if identity == 0:
         n = random.randrange(NUM_PLAYERS) + 1
         DEALER = 'PLAYER' + str(n)
         
-        message = str(json.dumps({'dealer': str(n)})).encode()
-        message_size = len(message).to_bytes(8, 'big')
+        message = str(json.dumps({'dealer': str(n)}))
         
-        if peer.broadcast_message(message_size + message) == 0:
+        if server.broadcast_message(message) == 0:
             CURR_STATE = 'QUIT'
             return
         
