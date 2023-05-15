@@ -35,9 +35,37 @@ class Server:
         while len(self.player_sockets) < NUM_PLAYERS:
             client_sock, client_addr = self.sock.accept()
             self.player_sockets.append(client_sock)
-            message = self.get_message(client_sock)
-            print(message['name'] + ' joined')
+            
+            # Get player name
+            message, ret_val = self.get_message(client_sock)
+            
+            if ret_val == 0 or 'name' not in message:
+                print('Lost connection to player')
+                self.player_sockets.remove(client_sock)
+                continue
+            else:
+                print(message['name'] + ' joined')
+            
+            # Send player number
+            message = json.dumps({'player_num': str(len(self.player_sockets))})
+            
+            if self.send_message(self.player_sockets[len(self.player_sockets)-1], message) == 0:
+                print('Lost connection to player')
+                self.player_sockets.remove(client_sock)
+                continue
+            
+            # Update registration without starting a new timer
             self.register(0)
+            
+            
+        message = str(json.dumps({'ready': '1'}))
+        
+        return self.broadcast_message(message)
+        
+        
+    def disconnect():
+        self.sock.close()
+        self.port = 0
         
         
     def register(self, timer=1):
@@ -45,7 +73,7 @@ class Server:
             threading.Timer(PING_INTERVAL, self.register).start()
         
         udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        udp_socket.sendto(json.dumps({'type': ENTRY_TYPE, 'owner': os.getlogin(), 'port': self.port, 'players': len(self.player_sockets)}).encode(), (CATALOG_SERVER[:-5], int(CATALOG_SERVER[-4:])))
+        udp_socket.sendto(json.dumps({'type': ENTRY_TYPE, 'owner': os.getlogin(), 'port': self.port, 'num_players': str(len(self.player_sockets))}).encode(), (CATALOG_SERVER[:-5], int(CATALOG_SERVER[-4:])))
         udp_socket.close()
         
         
@@ -62,6 +90,18 @@ class Server:
         return 1
         
         
+    def send_message(self, player_sock, message):
+        message_size = len(message).to_bytes(8, 'big')
+        
+        try:
+            player_sock.sendall(message_size + message.encode())
+        except:
+            del self.player_sockets[1:]
+            return 0
+        
+        return 1
+        
+        
     def get_message(self, player_sock):
         try:
             # Get message size
@@ -74,9 +114,7 @@ class Server:
                 message += player_sock.recv(min(READ_BLOCK_SIZE, message_size - bytes_read)).decode()
                 bytes_read += min(READ_BLOCK_SIZE, message_size - bytes_read)
                 
-            return json.loads(message)
+            return (json.loads(message), 1)
         
         except:
-            self.disconnect()
-        
-        
+            return (None, 0)

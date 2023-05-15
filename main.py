@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 
 import os
-import http.client
-import time
 import json
-import socket
 import random
 
 from server import Server
@@ -64,7 +61,28 @@ class Discard:
         
 class Player:
     def __init__(self):
+        # Whether player acts as a server or a client
+        self.server = None
+        self.client = None
+        
+        # 1 or 2 or 3
+        self.number = None
+        
+        # list of Card objects
         self.hand = list()
+        
+        
+    def setIdentity(self, identity=''):
+        if identity == 'SERVER':
+            self.server = Server()
+            self.client = None
+        elif identity == 'CLIENT':
+            self.client = Client()
+            self.server = None
+        else:
+            self.server = None
+            self.client = None
+        
         
     def draw(self, card):
         if card:
@@ -72,6 +90,7 @@ class Player:
             return 1
         else:
             return 0
+        
         
     # i is a string representing the index of the card in hand to discard
     def discard(self, i):
@@ -83,12 +102,7 @@ class Player:
 
 ### GLOBALS ###
 #             #
-server = Server()
-
-client = Client()
-
-# 0 for host, 1 for client
-identity = None
+player = Player()
 
 CURR_STATE  = None
 
@@ -101,113 +115,127 @@ LAST_DRAW   = None
 
 
 def menu():
-    global CURR_STATE
+    global player, CURR_STATE
     
     print('q: quit\n0: host\n1: join\n')
     choice = input('> ')
     while all(option != choice for option in ('q', '0', '1')):
-        print('Invalid option\n\n')
+        print('Invalid option\n')
         return
     
     if choice == 'q':
         CURR_STATE = 'QUIT'
+        
     elif choice == '0':
+        # Set player identity to server
+        player.setIdentity('SERVER')
+        
         CURR_STATE = 'HOST'
+        
     elif choice == '1':
+        # Set player identity to client
+        player.setIdentity('CLIENT')
+        
         CURR_STATE = 'JOIN'
     
     
 # Host a lobby
 def hostLobby():
-    global server, identity, CURR_STATE
+    global player, CURR_STATE
     
     # Host lobby
-    server.host_lobby()
-    
-    # Broadcast to players that game is ready!
-    message = str(json.dumps({'ready': '1'}))
-    
-    if server.broadcast_message(message) == 0:
-        CURR_STATE = 'QUIT'
+    if player.server.host_lobby() == 0:
+        print('Failed to start game\n')
+        
+        # Reset identity to unknown
+        player.setIdentity()
+        CURR_STATE = 'MENU'
         return
     
-    # Set identity to host and go to SETUP game state
-    identity = 0
     CURR_STATE = 'SETUP'
     
     
-    message_size = len(message).to_bytes(8, 'big')
 # Join a lobby
 def joinLobby():
-    global client, identity, CURR_STATE
+    global player, CURR_STATE
     
     # Get lobbies
-    lobbies = client.lookup()
+    lobbies = player.client.lookup()
     
     # Print option select
     print('b: back to menu')
     print('r: refresh list')
     for i in range(len(lobbies)):
-        print(str(i) + ': ' + lobbies[i]['owner'] + ' - ' + str(lobbies[i]['address']) + ':' + str(lobbies[i]['port']) + ' [' + str(lobbies[i]['players']) + '/3]')
+        print(str(i) + ': ' + lobbies[i]['owner'] + ' - ' + str(lobbies[i]['address']) + ':' + str(lobbies[i]['port']) + ' [' + str(lobbies[i]['num_players']) + '/' + str(NUM_PLAYERS) +  ']')
     
     # Get option
     choice = input('> ')
-    while not choice.isnumeric() or int(choice) >= len(lobbies):
+    if not choice.isnumeric() or int(choice) >= len(lobbies):
         if choice == 'b':
+            # Reset identity to unknown
+            player.setIdentity()
             CURR_STATE = 'MENU'
             return
-        elif choice == 'r':
+            
+        if choice == 'r':
             return
         
-        print('Invalid option\n\n')
+        print('Invalid option\n')
         return
         
     # Try to connect to the lobby of choice
-    if not client.connect(lobbies[int(choice)]['address'], lobbies[int(choice)]['port']):
-        print('Unable to connect to lobby\n\n')
+    player.number = player.client.join_lobby(lobbies[int(choice)])
+    
+    if player.number < 2 or player.number > NUM_PLAYERS:
         return
-        
-    else:
-        # Send name to host
-        message = str(json.dumps({'name': os.getlogin()}))
-        
-        if client.send_message(message) == 0:
-            CURR_STATE = 'QUIT'
+    
+    # Wait for game to start I guess
+    print('Waiting for players...')
+    message = player.client.get_message()
+    
+    if player.client.sock:
+        if 'ready' in message and message['ready'] == '1':
+            CURR_STATE = 'SETUP'
             return
-        
-        # Wait for game to start I guess
-        print('Waiting for players...')
-        message = client.get_message()
-        
-        if client.sock:
-            if message['ready'] == '1':
-                # Set identity to client and go to SETUP game state
-                identity = 1
-                CURR_STATE = 'SETUP'
+    
+    print('Unexpected error: I have no idea')
+    player.setIdentity()
+    CURR_STATE = 'MENU'
     
     
 def setup():
-    global server, client, identity, CURR_STATE
+    global player, CURR_STATE
     
-    if identity == 0:
+    if player.server:
+        player.number = 1
+        
         n = random.randrange(NUM_PLAYERS) + 1
         DEALER = 'PLAYER' + str(n)
         
         message = str(json.dumps({'dealer': str(n)}))
         
-        if server.broadcast_message(message) == 0:
-            CURR_STATE = 'QUIT'
+        if player.server.broadcast_message(message) == 0:
+            print('Failed to send a message to a player')
+            player.setIdentity()
+            CURR_STATE = 'MENU'
             return
         
-        CURR_STATE = DEALER
+    elif player.client:
+        message = player.client.get_message()
         
-    elif identity == 1:
-        message = client.get_message()
+        if 'dealer' in message:
+            n = int(message['dealer'])
+            DEALER = 'PLAYER' + str(n)
         
-        n = int(message['dealer'])
-        DEALER = 'PLAYER' + str(n)
+    else:
+        print('Unexpected error: player is neither server nor client in SETUP state')
+        player.setIdentity()
+        CURR_STATE = 'MENU'
+        return
         
+    print('You are player ' + str(player.number))
     print('Player ' + str(n) + ' is the dealer!')
+    CURR_STATE = DEALER
     
     
 def player1():
