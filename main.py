@@ -11,13 +11,19 @@ from client import Client
 #               #
 NUM_PLAYERS  = 3
 
+STARTING_HAND_SIZE = 12
+
 RANKS   = [
-            'Ace', '1', '2', '3', '4',
-            '5', '6', '7', '8', '9', '10',
-            'Jack', 'Queen', 'King'
+            'A', '2', '3', '4', '5', '6', '7',
+            '8', '9', '10', 'J', 'Q', 'K'
           ]
 
-SUITS   = [ 'Clubs', 'Spades', 'Hearts', 'Diamonds' ]
+CLUB    = '\U00002660'
+SPADE   = '\U00002663'
+HEART   = '\U00002665'
+DIAMOND = '\U00002666'
+
+SUITS   = [ CLUB, SPADE, HEART, DIAMOND ]
 #               #
 #################
 
@@ -29,6 +35,9 @@ class Card:
         self.rank = rank
         self.suit = suit
         self.points = min(max(1, RANKS.index(self.rank)), 10)
+    
+    def decompose(self):
+        return (self.rank, self.suit)
         
         
 class Deck:
@@ -65,11 +74,14 @@ class Player:
         self.server = None
         self.client = None
         
+        # Server will have deck
+        self.deck = None
+        
         # 1 or 2 or 3
         self.number = None
         
         # list of Card objects
-        self.hand = list()
+        self.hand = None
         
         
     def setIdentity(self, identity=''):
@@ -84,6 +96,19 @@ class Player:
             self.client = None
         
         
+    def composeHand(self, hand_data):
+        self.hand = [Card(card_data[0], card_data[1]) for card_data in hand_data]
+        
+        
+    def displayHand(self):
+        self.hand.sort(key=lambda x: x.suit)
+        self.hand.sort(key=lambda x: RANKS.index(x.rank))
+        
+        for i in range(len(self.hand)):
+            print(f'{i:2d}: {self.hand[i].rank.rjust(2)}{self.hand[i].suit}')
+        
+        
+    # Requests a card from the server's deck and puts it into hand
     def draw(self, card):
         if card:
             self.hand.append(card)
@@ -104,12 +129,16 @@ class Player:
 #             #
 player = Player()
 
-CURR_STATE  = None
+# List of player names
+names = list()
 
-DEALER  = None
+# Index for names for whose turn it is
+turn = None
+
+CURR_STATE = None
 
 # Tracks the last player to draw a card from the deck to settle draws
-LAST_DRAW   = None
+LAST_DRAW = None
 #             #
 ###############
 
@@ -141,10 +170,14 @@ def menu():
     
 # Host a lobby
 def hostLobby():
-    global player, CURR_STATE
+    global player, names, CURR_STATE
     
     # Host lobby
-    if player.server.host_lobby() == 0:
+    names, ret_val = player.server.host_lobby()
+    
+    if ret_val == 0:
+        names = list()
+        
         print('Failed to start game\n')
         
         # Reset identity to unknown
@@ -157,7 +190,7 @@ def hostLobby():
     
 # Join a lobby
 def joinLobby():
-    global player, CURR_STATE
+    global player, names, CURR_STATE
     
     # Get lobbies
     lobbies = player.client.lookup()
@@ -195,8 +228,10 @@ def joinLobby():
     
     if player.client.sock:
         if 'ready' in message and message['ready'] == '1':
-            CURR_STATE = 'SETUP'
-            return
+            if 'names' in message:
+                names = message['names']
+                CURR_STATE = 'SETUP'
+                return
     
     print('Unexpected error: I have no idea')
     player.setIdentity()
@@ -204,15 +239,17 @@ def joinLobby():
     
     
 def setup():
-    global player, CURR_STATE
+    global player, names, turn, CURR_STATE
     
     if player.server:
-        player.number = 1
+        # Set own player number
+        player.number = 0
         
-        n = random.randrange(NUM_PLAYERS) + 1
-        DEALER = 'PLAYER' + str(n)
+        # Set state to first player
+        turn = random.randrange(NUM_PLAYERS)
         
-        message = str(json.dumps({'dealer': str(n)}))
+        # Broadcast first player
+        message = str(json.dumps({'turn': str(turn)}))
         
         if player.server.broadcast_message(message) == 0:
             print('Failed to send a message to a player')
@@ -220,12 +257,45 @@ def setup():
             CURR_STATE = 'MENU'
             return
         
+        # Deal the cards
+        player.server.deck = Deck()
+        player.server.discard = Discard()
+        player.server.deck.shuffle()
+        
+        hands = list()
+        for i in range(NUM_PLAYERS):
+            hands.append(list())
+        
+        for i in range(STARTING_HAND_SIZE):
+            for j in range(NUM_PLAYERS):
+                hands[j].append(player.server.deck.draw().decompose())
+        
+        # Send hands to players
+        for i in range(1, NUM_PLAYERS):
+            message = str(json.dumps({'hand': hands[i]}))
+            
+            if player.server.send_message(player.server.player_sockets[i], message) == 0:
+                print('Failed to send hand to ' + names[i])
+                player.setIdentity()
+                CURR_STATE = 'MENU'
+                return
+        
+        # Set own hand
+        player.composeHand(hands[0])
+        
     elif player.client:
+        
+        # Receive who's first
         message = player.client.get_message()
         
-        if 'dealer' in message:
-            n = int(message['dealer'])
-            DEALER = 'PLAYER' + str(n)
+        if 'turn' in message:
+            turn = int(message['turn'])
+        
+        # Receive hand from server
+        hand_data = player.client.get_message()
+        
+        if 'hand' in hand_data:
+            player.composeHand(hand_data['hand'])
         
     else:
         print('Unexpected error: player is neither server nor client in SETUP state')
@@ -233,21 +303,78 @@ def setup():
         CURR_STATE = 'MENU'
         return
         
-    print('You are player ' + str(player.number))
-    print('Player ' + str(n) + ' is the dealer!')
-    CURR_STATE = DEALER
+    os.system('clear')
+    print(names[turn] + ' goes first!')
+    CURR_STATE = 'PLAYER_TURN'
     
     
-def player1():
-    pass
+def display_turn():
+    global player, turn, CURR_STATE
+    
+    print()
+    player.displayHand()
+    print()
+    
+    # Display deck and discard count
+    if player.server:
+        deck_size = len(player.server.deck.deck)
+        discard_size = len(player.server.discard.discard)
+        
+        message = str(json.dumps({'deck_size': str(deck_size), 'discard_size': str(discard_size)}))
+        
+        if player.server.broadcast_message(message) == 0:
+            print('Failed to send a message to a player')
+            player.setIdentity()
+            CURR_STATE = 'MENU'
+            return
+    
+    elif player.client:
+        message = player.client.get_message()
+        
+        if 'deck_size' in message and 'discard_size' in message:
+            deck_size = int(message['deck_size'])
+            discard_size = int(message['discard_size'])
+            
+    else:
+        print('Unexpected error: player is neither server nor client in SETUP state')
+        player.setIdentity()
+        CURR_STATE = 'MENU'
+        return
+        
+    print(f'Deck   : {deck_size:2d}')
+    print(f'Discard: {discard_size:2d}\n')
+    
+    if player.number == turn:
+        print('Your turn\n')
+        
+        # Display possible actions
+        #...
+        
+        return 1
+        
+    else:
+        print(names[turn] + '\'s turn')
+        return 0
     
     
-def player2():
-    pass
+def player_turn():
+    myTurn = display_turn()
     
-    
-def player3():
-    pass
+    # Your turn
+    if myTurn == 1:
+        # Do something idk
+        while(True):
+            pass
+        
+    # Someone else's turn
+    elif myTurn == 0:
+        # Wait for server
+        while(True):
+            pass
+        
+    # Error, probably going back to MENU state
+    else:
+        return
     
     
 def end():
@@ -265,12 +392,8 @@ def changeState():
         joinLobby()
     elif CURR_STATE == 'SETUP':
         setup()
-    elif CURR_STATE == 'PLAYER1':
-        player1()
-    elif CURR_STATE == 'PLAYER2':
-        player2()
-    elif CURR_STATE == 'PLAYER3':
-        player3()
+    elif CURR_STATE[:6] == 'PLAYER':
+        player_turn()
     elif CURR_STATE == 'END':
         end()
     elif CURR_STATE == 'QUIT':

@@ -32,6 +32,7 @@ class Server:
         # Register with the name server
         self.register()
         
+        names = [os.getlogin()]
         while len(self.player_sockets) < NUM_PLAYERS:
             client_sock, client_addr = self.sock.accept()
             self.player_sockets.append(client_sock)
@@ -44,6 +45,7 @@ class Server:
                 self.player_sockets.remove(client_sock)
                 continue
             else:
+                names.append(message['name'])
                 print(message['name'] + ' joined')
             
             # Send player number
@@ -58,9 +60,9 @@ class Server:
             self.register(0)
             
             
-        message = str(json.dumps({'ready': '1'}))
+        message = str(json.dumps({'ready': '1', 'names': names}))
         
-        return self.broadcast_message(message)
+        return (names, self.broadcast_message(message))
         
         
     def disconnect():
