@@ -12,14 +12,6 @@ from client import Client
 
 ### CONSTANTS ###
 #               #
-CATALOG_SERVER  = 'catalog.cse.nd.edu:9097'
-
-ENTRY_TYPE  = 'Tong-its'
-
-PING_INTERVAL   = 60
-
-READ_BLOCK_SIZE = 1<<12
-
 NUM_PLAYERS  = 3
 
 RANKS   = [
