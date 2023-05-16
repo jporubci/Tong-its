@@ -125,3 +125,87 @@ class Client:
         return 0
         
         
+    def drawCard(self, option):
+        try:
+            self.send_message(json.dumps({'command': 'drawCard', 'option': option}))
+            response = self.get_message()
+            
+            return response
+            
+        except:
+            print('Failed to get response.')
+            self.disconnect()
+            
+        return None
+        
+        
+    def expose(self, cards):
+        try:
+            self.send_message(json.dumps({'command': 'expose', 'cards': cards}))
+            response = self.get_message()
+            
+            return response
+            
+        except:
+            print('Failed to get response.')
+            self.disconnect()
+            
+        return None
+        
+        
+    def draw(self, cards):
+        try:
+            self.send_message(json.dumps({'command': 'draw'}))
+            response = self.get_message()
+            
+            return response
+            
+        except:
+            print('Failed to get response.')
+            self.disconnect()
+            
+        return None
+        
+        
+    def challenge(self):
+        try:
+            self.send_message(json.dumps({'command': 'challenge'}))
+            response = self.get_message()
+            
+            return response
+            
+        except:
+            print('Failed to get response.')
+            self.disconnect()
+            
+        return None
+        
+        
+    def fold(self):
+        try:
+            self.send_message(json.dumps({'command': 'fold'}))
+            response = self.get_message()
+            
+            return response
+            
+        except:
+            print('Failed to get response.')
+            self.disconnect()
+            
+        return None
+        
+        
+    def discardCard(self, card):
+        try:
+            self.send_message(json.dumps({'command': 'discardCard', 'card': card}))
+            response = self.get_message()
+            
+            return response
+            
+        except:
+            print('Failed to get response.')
+            self.disconnect()
+            
+        return None
+        
+        

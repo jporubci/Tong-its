@@ -10,7 +10,7 @@ ENTRY_TYPE      = 'Tong-its'
 PING_INTERVAL   = 60
 READ_BLOCK_SIZE = 1<<12
 NUM_PLAYERS     = 3
-    
+
 class Server:
     def __init__(self):
         self.sock = None
@@ -49,7 +49,7 @@ class Server:
                 print(message['name'] + ' joined')
             
             # Send player number
-            message = json.dumps({'player_num': str(len(self.player_sockets))})
+            message = json.dumps({'player_num': str(len(self.player_sockets) - 1)})
             
             if self.send_message(self.player_sockets[len(self.player_sockets)-1], message) == 0:
                 print('Lost connection to player')
@@ -120,3 +120,5 @@ class Server:
         
         except:
             return (None, 0)
+        
+        

@@ -100,27 +100,23 @@ class Player:
         self.hand = [Card(card_data[0], card_data[1]) for card_data in hand_data]
         
         
-    def displayHand(self):
+    # Display hand in a column or a row
+    def displayHand(self, option):
         self.hand.sort(key=lambda x: x.suit)
         self.hand.sort(key=lambda x: RANKS.index(x.rank))
         
-        for i in range(len(self.hand)):
-            print(f'{i:2d}: {self.hand[i].rank.rjust(2)}{self.hand[i].suit}')
-        
-        
-    # Requests a card from the server's deck and puts it into hand
-    def draw(self, card):
-        if card:
-            self.hand.append(card)
-            return 1
-        else:
-            return 0
-        
-        
-    # i is a string representing the index of the card in hand to discard
-    def discard(self, i):
-        if i.isnumeric() and int(i) < len(self.hand):
-            return self.hand.pop(int(i))
+        if option == 'col':
+            for i in range(len(self.hand)):
+                print(f'{i:2d}: {self.hand[i].rank.rjust(2)}{self.hand[i].suit}')
+            
+        elif option == 'row':
+            if len(self.hand) > 0:
+                print(f'{self.hand[0].rank.rjust(2)}{self.hand[0].suit}', end='')
+                
+            for i in range(1, len(self.hand)):
+                print(f' {self.hand[i].rank.rjust(2)}{self.hand[i].suit}', end='')
+            
+            print()
 #             #
 ###############
 
@@ -138,7 +134,7 @@ turn = None
 CURR_STATE = None
 
 # Tracks the last player to draw a card from the deck to settle draws
-LAST_DRAW = None
+last_draw = None
 #             #
 ###############
 
@@ -219,7 +215,7 @@ def joinLobby():
     # Try to connect to the lobby of choice
     player.number = player.client.join_lobby(lobbies[int(choice)])
     
-    if player.number < 2 or player.number > NUM_PLAYERS:
+    if player.number < 1 or player.number >= NUM_PLAYERS:
         return
     
     # Wait for game to start I guess
@@ -304,23 +300,24 @@ def setup():
         return
         
     os.system('clear')
-    print(names[turn] + ' goes first!')
+    #print(names[turn] + ' goes first!')
     CURR_STATE = 'PLAYER_TURN'
     
     
-def display_turn():
+def drawPhase():
     global player, turn, CURR_STATE
     
-    print()
-    player.displayHand()
-    print()
-    
-    # Display deck and discard count
+    # Get deck and discard count
     if player.server:
         deck_size = len(player.server.deck.deck)
         discard_size = len(player.server.discard.discard)
         
-        message = str(json.dumps({'deck_size': str(deck_size), 'discard_size': str(discard_size)}))
+        if discard_size > 0:
+            discard_top = player.server.discard.discard[0].decompose()
+        else:
+            discard_top = (None, None)
+        
+        message = str(json.dumps({'deck_size': str(deck_size), 'discard_size': str(discard_size), 'discard_top': discard_top}))
         
         if player.server.broadcast_message(message) == 0:
             print('Failed to send a message to a player')
@@ -334,43 +331,105 @@ def display_turn():
         if 'deck_size' in message and 'discard_size' in message:
             deck_size = int(message['deck_size'])
             discard_size = int(message['discard_size'])
+            discard_top = message['discard_top']
             
     else:
         print('Unexpected error: player is neither server nor client in SETUP state')
         player.setIdentity()
         CURR_STATE = 'MENU'
         return
-        
-    print(f'Deck   : {deck_size:2d}')
-    print(f'Discard: {discard_size:2d}\n')
     
+    # Base case
+    if deck_size == 0:
+        CURR_STATE = 'END'
+        return
+    
+    # Display deck and discard sizes
+    print(f'Deck ({deck_size})')
+    
+    if discard_size > 0:
+        print(f'Discard ({discard_size}): {discard_top[0]}{discard_top[1]}\n')
+    else:
+        print(f'Discard ({discard_size})')
+    
+    # Display hand
+    print()
+    player.displayHand('row')
+    print()
+    
+    # Display whose turn it is
     if player.number == turn:
         print('Your turn\n')
         
-        # Display possible actions
-        #...
+        print('Draw phase\n')
         
-        return 1
+        actions = list()
+        # Display possible actions
+        if deck_size > 0:
+            print(f'{num_action}: Draw a card from the deck')
+            actions.append('drawCard deck')
+            
+        if discard_size > 0:
+            print(f'{num_action}: Draw the {discard_top[0]}{discard_top[1]} from the discard pile')
+            actions.append('drawCard discard')
+        
+        return actions
         
     else:
-        print(names[turn] + '\'s turn')
-        return 0
+        print(names[turn] + '\'s turn\n')
+        print('Draw phase\n')
+        
+        return []
     
     
 def player_turn():
-    myTurn = display_turn()
+    global player, turn, CURR_STATE, last_draw
+    
+    actions = drawPhase()
     
     # Your turn
-    if myTurn == 1:
-        # Do something idk
+    if len(actions) > 0:
+        # Get option
+        choice = input('> ')
+        while not choice.isnumeric() or int(choice) >= len(actions):
+            print('Invalid option\n')
+            choice = input('> ')
+            
+        if actions[int(choice)] == 'drawCard deck':
+            c = player.client.drawCard('deck')
+            player.hand.append()
+        # Client operations:
+        # drawCard(option) - Draw from deck or discard pile
+        # expose(cards) - Expose meld
+        # draw() - Propose a draw
+        # challenge() - Accept the draw
+        # fold() - Decline the draw
+        # discardCard(card) - Discard a card
+        
+        # Server responses:
+        # drawCard(option) - Returns a decomposed card on success, otherwise failure
+        # expose(cards) - Returns success, otherwise failure
+        # draw() - Returns success, otherwise failure
+        # challenge() - Returns success, otherwise failure
+        # fold() - Returns success, otherwise failure
+        # discardCard(card) - Returns success, otherwise failure
+        
         while(True):
             pass
         
     # Someone else's turn
     elif myTurn == 0:
+        # Wait for client
+        if player.server:
+            print('Waiting for client')
+            while(True):
+                pass
+            
         # Wait for server
-        while(True):
-            pass
+        elif player.client:
+            print('Waiting for server')
+            while(True):
+                pass
         
     # Error, probably going back to MENU state
     else:
@@ -392,7 +451,7 @@ def changeState():
         joinLobby()
     elif CURR_STATE == 'SETUP':
         setup()
-    elif CURR_STATE[:6] == 'PLAYER':
+    elif CURR_STATE == 'PLAYER_TURN':
         player_turn()
     elif CURR_STATE == 'END':
         end()
@@ -404,18 +463,12 @@ def changeState():
     return 1
     
     
-def displayState():
-    global CURR_STATE
-    
-    #os.system('clear')
-    
-    
 def main():
     global CURR_STATE
     
     CURR_STATE = 'MENU'
     while changeState():
-        displayState()
+        pass
     
     
 ### EXECUTION ###
