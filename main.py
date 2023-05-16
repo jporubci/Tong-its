@@ -364,7 +364,7 @@ def drawPhase():
         actions = list()
         # Display possible actions
         if deck_size > 0:
-            print(f'{num_action}: Draw a card from the deck')
+            print(f'{len(actions)}: Draw a card from the deck')
             actions.append('drawCard deck')
         
         # CONTINUE ACTIONS HERE: EXPOSE, ETC
@@ -421,7 +421,7 @@ def player_turn():
             pass
         
     # Someone else's turn
-    elif myTurn == 0:
+    elif len(actions) == 0:
         # Wait for client
         if player.server:
             print('Waiting for client')
