@@ -361,23 +361,18 @@ def drawPhase():
     if player.number == turn:
         print('Your turn\n')
         
-        print('Draw phase\n')
-        
         actions = list()
         # Display possible actions
         if deck_size > 0:
             print(f'{num_action}: Draw a card from the deck')
             actions.append('drawCard deck')
-            
-        if discard_size > 0:
-            print(f'{num_action}: Draw the {discard_top[0]}{discard_top[1]} from the discard pile')
-            actions.append('drawCard discard')
         
+        # CONTINUE ACTIONS HERE: EXPOSE, ETC
+            
         return actions
         
     else:
         print(names[turn] + '\'s turn\n')
-        print('Draw phase\n')
         
         return []
     
@@ -397,7 +392,15 @@ def player_turn():
             
         if actions[int(choice)] == 'drawCard deck':
             c = player.client.drawCard('deck')
-            player.hand.append()
+            player.hand.append(Card(c[0], c[1]))
+        
+        elif actions[int(choice)] == 'drawCard discard':
+            c = player.client.drawCard('discard')
+            player.hand.append(Card(c[0], c[1]))
+            
+        last_draw = player.name
+        
+        
         # Client operations:
         # drawCard(option) - Draw from deck or discard pile
         # expose(cards) - Expose meld
