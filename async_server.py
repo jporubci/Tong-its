@@ -3,6 +3,7 @@
 # async_main.py
 
 import asyncio
+import sys
 import time
 import os
 import json
@@ -27,11 +28,14 @@ class Host:
         self.addr = None
         self.port = None
         
-        self.clients = list()
+        # Lock for self.clients
         self.clients_lock = asyncio.Lock()
+        self.clients = list()
     
     
+    # Host a lobby
     async def host(self):
+        
         if self.prev_state == 'MENU':
             # Program listens for incoming connections
             self.server = await asyncio.start_server(self._handle_client, host=socket.gethostname(), backlog=self.MAX_CLIENTS)
@@ -45,10 +49,13 @@ class Host:
             
             # Register every REGISTER_INTERVAL seconds
             asyncio.create_task(self._register_interval())
-            
-        lobbies = await self._display_lobbies()
         
-        # Display own lobby
+        # Get the list of lobbies and display them
+        lobbies = await self._display_lobbies()
+        if lobbies == None:
+            return 'QUIT'
+        
+        # Display own lobby and kick options
         print()
         print(self.name)
         async with self.clients_lock:
@@ -56,14 +63,23 @@ class Host:
                 print(f'{i}: {client[0]}')
         print()
         
+        # Display options
         print('r: refresh')
         print('d: disband')
         print('s: start')
         print('q: quit')
         
-        choice = input('\n> ')
+        # Wait for user input
+        print('\n> ', end='')
+        stdin_reader = await self._read_input()
+        choice = None
+        while not choice:
+            choice = (await stdin_reader.readline()).decode().strip()
         print()
+        
+        # Parse user input
         while not choice.isnumeric() or int(choice) > len(lobbies) or choice == '0':
+            
             if choice == 'r':
                 return 'HOST'
                 
@@ -71,7 +87,7 @@ class Host:
                 # TODO: Implement disband
                 pass
             
-            if choice == 's':
+            elif choice == 's':
                 # TODO: Implement start
                 pass
             
@@ -79,88 +95,113 @@ class Host:
                 return 'QUIT'
             
             print('Invalid option')
-            choice = input('\n> ')
+            
+            # Wait for user input
+            print('\n> ', end='')
+            stdin_reader = await self._read_input()
+            choice = None
+            while not choice:
+                choice = (await stdin_reader.readline()).decode().strip()
             print()
-        
+            
         # TODO: Implement kick
+        #
         
         return 'HOST'
     
     
+    # Reads input without blocking
+    async def _read_input(self):
+        # https://stackoverflow.com/a/64317899
+        loop = asyncio.get_event_loop()
+        stdin_reader = asyncio.StreamReader()
+        protocol = asyncio.StreamReaderProtocol(stdin_reader)
+        await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+        
+        return stdin_reader
+    
+    
+    # Handle incoming connection attempt from client
     async def _handle_client(self, reader, writer):
+        
         async with self.clients_lock:
-            # Read first 8 bytes to get message size
-            message_size = int.from_bytes((await reader.readexactly(8)), 'big')
-            
             # Get message
+            message_size = int.from_bytes((await reader.readexactly(8)), 'big')
             message = json.loads((await reader.readexactly(message_size)).decode())
             
-            if 'command' in message:
-                if message['command'] == 'join' and 'name' in message and len(self.clients) < self.MAX_CLIENTS:
-                    # Accept client
-                    self.clients.append([message['name'], reader, writer])
-                    self._register()
-                    
-                    # Send response
-                    response = str(json.dumps({'command': 'join', 'status': 'success'}))
-                    
-                    response_size = len(response.encode()).to_bytes(8, 'big')
-                    
-                    writer.write(response_size + response.encode())
-                    await writer.drain()
-                    
-                    # Serve client asynchronously from here on out
-                    self.clients[-1].append(asyncio.create_task(self._serve_client(len(self.clients) - 1)))
+            # Parse message
+            if all(key in message for key in ('command', 'name')) and message['command'] == 'join' and len(self.clients) < self.MAX_CLIENTS:
                 
-                else:
-                    # Reject client
-                    response = str(json.dumps({'command': 'join', 'status': 'failure'}))
-                    
-                    response_size = len(response.encode()).to_bytes(8, 'big')
-                    
-                    writer.write(response_size + response.encode())
-                    await writer.drain()
-                    
-                    writer.close()
-                    await writer.wait_closed()
+                # Accept client
+                self.clients.append([message['name'], reader, writer])
+                self._register()
+                
+                # Send response
+                response = str(json.dumps({'command': 'join', 'status': 'success'}))
+                response_size = len(response.encode()).to_bytes(8, 'big')
+                writer.write(response_size + response.encode())
+                await writer.drain()
+                
+                # Serve client asynchronously from here on out
+                self.clients[-1].append(asyncio.create_task(self._serve_client(len(self.clients) - 1)))
+            
+            else:
+                
+                # Send response
+                response = str(json.dumps({'command': 'join', 'status': 'failure'}))
+                response_size = len(response.encode()).to_bytes(8, 'big')
+                writer.write(response_size + response.encode())
+                await writer.drain()
+                
+                # Close connection
+                writer.close()
+                await writer.wait_closed()
     
     
+    # Listen to messages from client
     async def _serve_client(self, i):
         while True:
-            # Read first 8 bytes to get message size
-            async with self.clients_lock:
-                message_size = int.from_bytes((await self.clients[i][1].readexactly(8)), 'big')
-                
-                # Get message
-                message = json.loads((await self.clients[i][1].readexactly(message_size)).decode())
             
+            # Make sure to keep reader operations outside of lock so you don't hold onto the lock for so long
+            async with self.clients_lock:
+                reader = self.clients[i][1]
+            
+            # Get message
+            message_size = int.from_bytes((await reader.readexactly(8)), 'big')
+            message = json.loads((await reader.readexactly(message_size)).decode())
+            
+            # Parse message
             if 'command' in message:
+                
+                # Perhaps a retried message that got delayed - probably safe to just ignore it
                 if message['command'] == 'join':
                     pass
                 
                 elif message['command'] == 'get_client_names':
-                    # Build response
-                    async with self.clients_lock:
-                        response = str(json.dumps({'command': 'get_client_names', 'status': 'success', 'client_names': [client[0] for client in self.clients]}))
                     
-                    response_size = len(response.encode()).to_bytes(8, 'big')
+                    async with self.clients_lock:
+                        writer = self.clients[i][2]
+                        client_names = [client[0] for client in self.clients]
                     
                     # Send response
                     async with self.clients_lock:
-                        self.clients[i][2].write(response_size + response.encode())
-                        await self.clients[i][2].drain()
+                        response = str(json.dumps({'command': 'get_client_names', 'status': 'success', 'client_names': client_names}))
+                    response_size = len(response.encode()).to_bytes(8, 'big')
+                    writer.write(response_size + response.encode())
+                    await writer.drain()
                 
                 elif message['command'] == 'leave':
                     # TODO: Implement removal of client
                     pass
                 
-                else:
+                elif message['command'] == 'ping':
+                    # TODO: Implement ping
                     pass
     
     
-    # Requires self.clients_lock
+    # Requires self.clients_lock!
+    # Try to register with catalog server
     def _register(self):
-        # Try to register with catalog server
         try:
             return socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(str(json.dumps({'type': self.ENTRY_TYPE, 'owner': os.getlogin(), 'port': self.port, 'num_clients': len(self.clients)})).encode(), (self.CATALOG_SERVER[:-5], int(self.CATALOG_SERVER[-4:])))
         
@@ -169,20 +210,22 @@ class Host:
             return 0
     
     
+    # Register with catalog server every REGISTER_INTERVAL seconds
     async def _register_interval(self):
         while True:
-            # Register with catalog server every REGISTER_INTERVAL seconds
             await asyncio.sleep(self.REGISTER_INTERVAL)
             async with self.clients_lock:
                 self._register()
     
     
+    # Output for consistent error logging
     def _register_fail(self):
         print('Fatal error: failed to register with catalog server')
-        input('Press any key to end program\n')
     
     
+    # Output list of lobbies without enumeration
     async def _display_lobbies(self):
+        
         # Try to get catalog within time limit
         try:
             # Python 3.10
@@ -192,10 +235,9 @@ class Host:
             async with asyncio.timeout(DELAY):
                 response = await self._get_catalog()
             '''
-        
         except TimeoutError:
             self._get_catalog_fail()
-            return 0
+            return None
         
         # Parse response body
         lobbies = self._parse_catalog(response)
@@ -205,8 +247,8 @@ class Host:
             print(f'{lobby["owner"]} - {lobby["address"]}:{lobby["port"]} [{lobby["num_clients"]}/{self.MAX_CLIENTS}]')
         
         return lobbies
-
-
+    
+    
     async def _get_catalog(self):
         http_conn = http.client.HTTPConnection(self.CATALOG_SERVER)
         http_conn.request('GET', '/query.json')
@@ -214,11 +256,12 @@ class Host:
         http_conn.close()
         
         return response
-
-
+    
+    
+    # Return list of candidate lobbies
     def _parse_catalog(self, response):
-        lobbies = list()
         
+        lobbies = list()
         catalog = json.loads(response.read())
         
         for entry in catalog:
@@ -232,7 +275,7 @@ class Host:
                     # Ensure entry is most recent entry of its kind
                     most_recent = True
                     for i, lobby in enumerate(lobbies):
-                        if lobby['address'] == entry['address'] and lobby['port'] == entry['port'] and lobby['owner'] == entry['owner']:
+                        if all(lobby[key] == entry[key] for key in ('address', 'port', 'owner')):
                             if lobby['lastheardfrom'] < entry['lastheardfrom']:
                                 lobbies[i] = entry
                                 most_recent = False
@@ -245,11 +288,11 @@ class Host:
         lobbies.sort(key=lambda x: x['lastheardfrom'], reverse=True)
         
         return lobbies
-
-
+    
+    
+    # Output for consistent error logging
     def _get_catalog_fail():
         print('Fatal error: failed to get catalog from catalog server')
-        input('Press any key to end program\n')
 
 
 class Client:
@@ -274,8 +317,8 @@ class Client:
     
     
     async def waiting(self):
+        # If trying to join a lobby
         if self.prev_state == 'MENU':
-            print('Trying to connect to lobby')
             
             # Try to connect to chosen lobby
             self.reader, self.writer = await asyncio.open_connection(self.host_addr, self.host_port)
@@ -286,59 +329,188 @@ class Client:
             self.writer.write(message_size + message.encode())
             await self.writer.drain()
             
-            print('Waiting for response')
-            
-            # Wait for response
+            # Get response
             response_size = int.from_bytes((await self.reader.readexactly(8)), 'big')
-            
-            # Get client name
             response = json.loads((await self.reader.readexactly(response_size)).decode())
             
-            print('Received response')
-            
+            # Parse response
             if all(key in response for key in ('command', 'status')):
                 if response['command'] == 'join' and response['status'] == 'success':
-                    print('Joined lobby!')
+                    
+                    # Register every PING_INTERVAL seconds
+                    asyncio.create_task(self._ping_interval())
+                    
+                    return 'WAITING'
+            
+            # Error joining lobby
+            return 'MENU'
+        
+        # If waiting in lobby
+        elif self.prev_state == 'WAITING':
+            
+            # Request client names
+            message = str(json.dumps({'command': 'get_client_names'}))
+            message_size = len(message.encode()).to_bytes(8, 'big')
+            self.writer.write(message_size + message.encode())
+            await self.writer.drain()
+            
+            # Get response
+            response_size = int.from_bytes((await self.reader.readexactly(8)), 'big')
+            response = json.loads((await self.reader.readexactly(response_size)).decode())
+            
+            # Parse response
+            if all(key in response for key in ('command', 'status', 'client_names')):
+                if response['command'] == 'get_client_names' and response['status'] == 'success':
+                    
+                    # Display lobbies
+                    lobbies = await self._display_lobbies()
+                    if lobbies == None:
+                        return 'QUIT'
+                    
+                    # Display host name and client names
+                    print()
+                    print(self.host_name)
+                    for client_name in response['client_names']:
+                        print(client_name)
+                    print()
+                    
+                    # Display options
+                    print('r: refresh')
+                    print('l: leave')
+                    print('q: quit')
+                    
+                    # Wait for user input
+                    print('\n> ', end='')
+                    stdin_reader = await self._read_input()
+                    choice = None
+                    while not choice:
+                        choice = (await stdin_reader.readline()).decode().strip()
+                    print()
+                    
+                    # Parse user input
+                    while all(choice != option for option in ('r', 'l', 'q')):
+                        
+                        print('Invalid option')
+                        
+                        # Wait for user input
+                        print('\n> ', end='')
+                        stdin_reader = await self._read_input()
+                        choice = None
+                        while not choice:
+                            choice = (await stdin_reader.readline()).decode().strip()
+                        print()
+                    
+                    if choice == 'r':
+                        return 'WAITING'
+                    
+                    elif choice == 'l':
+                        # TODO: Implement leave
+                        pass
+                    
+                    elif choice == 'q':
+                        # TODO: Implement quit
+                        pass
                     
                     return 'WAITING'
             
             return 'MENU'
         
-        elif self.prev_state == 'WAITING':
-            print('Trying to get client names')
-            
-            # Request client names
-            message = str(json.dumps({'command': 'get_client_names'}))
-            
+        # Catch-all case
+        return 'QUIT'
+    
+    
+    # Ping host every PING_INTERVAL seconds
+    async def _ping_interval(self):
+        while True:
+            await asyncio.sleep(self.PING_INTERVAL)
+            # Ping host
+            message = str(json.dumps({'command': 'ping'}))
             message_size = len(message.encode()).to_bytes(8, 'big')
             self.writer.write(message_size + message.encode())
             await self.writer.drain()
+    
+    
+    # Output list of lobbies without enumeration
+    async def _display_lobbies(self):
+        
+        # Try to get catalog within time limit
+        try:
+            # Python 3.10
+            response = await asyncio.wait_for(self._get_catalog(), timeout=self.DELAY)
+            # Python 3.11
+            '''
+            async with asyncio.timeout(DELAY):
+                response = await self._get_catalog()
+            '''
+        except TimeoutError:
+            self._get_catalog_fail()
+            return None
+        
+        # Parse response body
+        lobbies = self._parse_catalog(response)
+        
+        # Display lobbies
+        for lobby in lobbies:
+            print(f'{lobby["owner"]} - {lobby["address"]}:{lobby["port"]} [{lobby["num_clients"]}/{self.MAX_CLIENTS}]')
+        
+        return lobbies
+    
+    
+    async def _get_catalog(self):
+        http_conn = http.client.HTTPConnection(self.CATALOG_SERVER)
+        http_conn.request('GET', '/query.json')
+        response = http_conn.getresponse()
+        http_conn.close()
+        
+        return response
+    
+    
+    # Return list of candidate lobbies
+    def _parse_catalog(self, response):
+        
+        lobbies = list()
+        catalog = json.loads(response.read())
+        
+        for entry in catalog:
             
-            print('Waiting for response')
-            
-            # Wait for response
-            response_size = int.from_bytes((await self.reader.readexactly(8)), 'big')
-            
-            response = json.loads((await self.reader.readexactly(response_size)).decode())
-            
-            print('Received response')
-            
-            # Parse response
-            if all(key in response for key in ('command', 'status')):
-                if response['command'] == 'get_client_names' and response['status'] == 'success' and 'client_names' in response:
-                    # Display lobbies, host name, and client names
-                    print('LOBBIES')
-                    print()
+            # If the entry dict has the necessary keys
+            if all(key in entry for key in ('type', 'lastheardfrom', 'num_clients', 'address', 'port', 'owner')):
+                
+                # If the entry is an open lobby (correct type, not stale, not full)
+                if entry['type'] == self.ENTRY_TYPE and entry['lastheardfrom'] >= time.time_ns() / 1000000000.0 - self.REGISTER_INTERVAL and entry['num_clients'] < self.MAX_CLIENTS:
                     
-                    print(self.host_name)
-                    print(*response['client_names'])
-                    print()
+                    # Ensure entry is most recent entry of its kind
+                    most_recent = True
+                    for i, lobby in enumerate(lobbies):
+                        if all(lobby[key] == entry[key] for key in ('address', 'port', 'owner')):
+                            if lobby['lastheardfrom'] < entry['lastheardfrom']:
+                                lobbies[i] = entry
+                                most_recent = False
+                                break
                     
-                    choice = input('\n> ')
-                    
-                    return 'WAITING'
-            
-            return 'MENU'
+                    if most_recent:
+                        lobbies.append(entry)
+        
+        # Sort lobbies by most to least recent
+        lobbies.sort(key=lambda x: x['lastheardfrom'], reverse=True)
+        
+        return lobbies
+    
+    
+    # Output for consistent error logging
+    def _get_catalog_fail():
+        print('Fatal error: failed to get catalog from catalog server')
+    
+    
+    # Reads input without blocking
+    async def _read_input(self):
+        # https://stackoverflow.com/a/64317899
+        loop = asyncio.get_event_loop()
+        stdin_reader = asyncio.StreamReader()
+        protocol = asyncio.StreamReaderProtocol(stdin_reader)
+        await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+        
+        return stdin_reader
 
 
 class Player:
@@ -363,6 +535,9 @@ class Player:
     
     async def menu(self):
         lobbies = await self._display_lobbies()
+        if lobbies == None:
+            return 'QUIT'
+        
         print('0: host')
         print('r: refresh')
         print('q: quit')
@@ -405,7 +580,7 @@ class Player:
         
         except TimeoutError:
             self._get_catalog_fail()
-            return 0
+            return None
         
         # Parse response body
         lobbies = self._parse_catalog(response)
@@ -459,7 +634,6 @@ class Player:
 
     def _get_catalog_fail():
         print('Fatal error: failed to get catalog from catalog server')
-        input('Press any key to end program\n')
 
 
 async def main():
