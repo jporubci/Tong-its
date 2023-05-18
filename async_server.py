@@ -87,10 +87,6 @@ class Host:
         return 'HOST'
     
     
-    async def _get_choice(self):
-        return input('\n> ')
-    
-    
     async def _handle_client(self, reader, writer):
         async with self.clients_lock:
             # Read first 8 bytes to get message size
