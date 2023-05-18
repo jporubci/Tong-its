@@ -48,10 +48,12 @@ class Host:
             
         lobbies = await self._display_lobbies()
         
+        # Display own lobby
         print()
         print(self.name)
-        # TODO: Display enumerated client names
-        #
+        async with self.clients_lock:
+            for i, client in enumerate(self.clients):
+                print(f'{i}: {client[0]}')
         print()
         
         print('r: refresh')
@@ -85,23 +87,86 @@ class Host:
         return 'HOST'
     
     
+    async def _get_choice(self):
+        return input('\n> ')
+    
+    
     async def _handle_client(self, reader, writer):
-        # Read first 8 bytes to get message size
-        message_size = (await reader.readexactly(8)).decode()
-        
-        # Get client name
-        client_name = (await reader.readexactly(message_size)).decode()
-        
         async with self.clients_lock:
-            self.clients.append((client_name, reader, writer))
-            self._register()
+            # Read first 8 bytes to get message size
+            message_size = int.from_bytes((await reader.readexactly(8)), 'big')
+            
+            # Get message
+            message = json.loads((await reader.readexactly(message_size)).decode())
+            
+            if 'command' in message:
+                if message['command'] == 'join' and 'name' in message and len(self.clients) < self.MAX_CLIENTS:
+                    # Accept client
+                    self.clients.append([message['name'], reader, writer])
+                    self._register()
+                    
+                    # Send response
+                    response = str(json.dumps({'command': 'join', 'status': 'success'}))
+                    
+                    response_size = len(response.encode()).to_bytes(8, 'big')
+                    
+                    writer.write(response_size + response.encode())
+                    await writer.drain()
+                    
+                    # Serve client asynchronously from here on out
+                    self.clients[-1].append(asyncio.create_task(self._serve_client(len(self.clients) - 1)))
+                
+                else:
+                    # Reject client
+                    response = str(json.dumps({'command': 'join', 'status': 'failure'}))
+                    
+                    response_size = len(response.encode()).to_bytes(8, 'big')
+                    
+                    writer.write(response_size + response.encode())
+                    await writer.drain()
+                    
+                    writer.close()
+                    await writer.wait_closed()
+    
+    
+    async def _serve_client(self, i):
+        while True:
+            # Read first 8 bytes to get message size
+            async with self.clients_lock:
+                message_size = int.from_bytes((await self.clients[i][1].readexactly(8)), 'big')
+                
+                # Get message
+                message = json.loads((await self.clients[i][1].readexactly(message_size)).decode())
+            
+            if 'command' in message:
+                if message['command'] == 'join':
+                    pass
+                
+                elif message['command'] == 'get_client_names':
+                    # Build response
+                    async with self.clients_lock:
+                        response = str(json.dumps({'command': 'get_client_names', 'status': 'success', 'client_names': [client[0] for client in self.clients]}))
+                    
+                    response_size = len(response.encode()).to_bytes(8, 'big')
+                    
+                    # Send response
+                    async with self.clients_lock:
+                        self.clients[i][2].write(response_size + response.encode())
+                        await self.clients[i][2].drain()
+                
+                elif message['command'] == 'leave':
+                    # TODO: Implement removal of client
+                    pass
+                
+                else:
+                    pass
     
     
     # Requires self.clients_lock
     def _register(self):
         # Try to register with catalog server
         try:
-            return socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(json.dumps({'type': self.ENTRY_TYPE, 'owner': os.getlogin(), 'port': self.port, 'num_clients': len(self.clients)}).encode(), (self.CATALOG_SERVER[:-5], int(self.CATALOG_SERVER[-4:])))
+            return socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(str(json.dumps({'type': self.ENTRY_TYPE, 'owner': os.getlogin(), 'port': self.port, 'num_clients': len(self.clients)})).encode(), (self.CATALOG_SERVER[:-5], int(self.CATALOG_SERVER[-4:])))
         
         except:
             self._register_fail()
@@ -124,8 +189,9 @@ class Host:
     async def _display_lobbies(self):
         # Try to get catalog within time limit
         try:
+            # Python 3.10
             response = await asyncio.wait_for(self._get_catalog(), timeout=self.DELAY)
-            
+            # Python 3.11
             '''
             async with asyncio.timeout(DELAY):
                 response = await self._get_catalog()
@@ -203,10 +269,80 @@ class Client:
         self.prev_state = player.prev_state
         self.curr_state = player.curr_state
         self.name = player.name
-        self.reader = player.reader
-        self.writer = player.writer
+        self.host_name = player.host_name
+        self.host_addr = player.host_addr
+        self.host_port = player.host_port
         
-        #
+        self.reader = None
+        self.writer = None
+    
+    
+    async def waiting(self):
+        if self.prev_state == 'MENU':
+            print('Trying to connect to lobby')
+            
+            # Try to connect to chosen lobby
+            self.reader, self.writer = await asyncio.open_connection(self.host_addr, self.host_port)
+            
+            # Send name to host
+            message = str(json.dumps({'command': 'join', 'name': self.name}))
+            message_size = len(message.encode()).to_bytes(8, 'big')
+            self.writer.write(message_size + message.encode())
+            await self.writer.drain()
+            
+            print('Waiting for response')
+            
+            # Wait for response
+            response_size = int.from_bytes((await self.reader.readexactly(8)), 'big')
+            
+            # Get client name
+            response = json.loads((await self.reader.readexactly(response_size)).decode())
+            
+            print('Received response')
+            
+            if all(key in response for key in ('command', 'status')):
+                if response['command'] == 'join' and response['status'] == 'success':
+                    print('Joined lobby!')
+                    
+                    return 'WAITING'
+            
+            return 'MENU'
+        
+        elif self.prev_state == 'WAITING':
+            print('Trying to get client names')
+            
+            # Request client names
+            message = str(json.dumps({'command': 'get_client_names'}))
+            
+            message_size = len(message.encode()).to_bytes(8, 'big')
+            self.writer.write(message_size + message.encode())
+            await self.writer.drain()
+            
+            print('Waiting for response')
+            
+            # Wait for response
+            response_size = int.from_bytes((await self.reader.readexactly(8)), 'big')
+            
+            response = json.loads((await self.reader.readexactly(response_size)).decode())
+            
+            print('Received response')
+            
+            # Parse response
+            if all(key in response for key in ('command', 'status')):
+                if response['command'] == 'get_client_names' and response['status'] == 'success' and 'client_names' in response:
+                    # Display lobbies, host name, and client names
+                    print('LOBBIES')
+                    print()
+                    
+                    print(self.host_name)
+                    print(*response['client_names'])
+                    print()
+                    
+                    choice = input('\n> ')
+                    
+                    return 'WAITING'
+            
+            return 'MENU'
 
 
 class Player:
@@ -224,8 +360,9 @@ class Player:
         self.name = os.getlogin()
         
         # Client
-        self.reader = None
-        self.writer = None
+        self.host_name = None
+        self.host_addr = None
+        self.host_port = None
     
     
     async def menu(self):
@@ -248,17 +385,13 @@ class Player:
             print()
         
         if choice == '0':
+            # Proceed to create server in Host
             return 'HOST'
         
-        # Try to connect to chosen lobby
-        lobby = lobbies[int(choice) - 1]
-        self.reader, self.writer = await asyncio.open_connection(lobby['address'], lobby['port'])
-        
-        # Send name to host
-        message = str(json.dumps({'command': 'join', 'name': os.getlogin()}))
-        message_size = len(message.encode()).to_bytes(8, 'big')
-        self.writer.write(message_size + message.encode())
-        await self.writer.drain()
+        # Save choice and proceed to Client.join()
+        self.host_name = lobbies[int(choice) - 1]['owner']
+        self.host_addr = lobbies[int(choice) - 1]['address']
+        self.host_port = lobbies[int(choice) - 1]['port']
         
         return 'WAITING'
 
@@ -266,8 +399,9 @@ class Player:
     async def _display_lobbies(self):
         # Try to get catalog within time limit
         try:
+            # Python 3.10
             response = await asyncio.wait_for(self._get_catalog(), timeout=self.DELAY)
-            
+            # Python 3.11
             '''
             async with asyncio.timeout(DELAY):
                 response = await self._get_catalog()
