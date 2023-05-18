@@ -61,9 +61,9 @@ class Host:
         
         choice = input('\n> ')
         print()
-        while not choice.isnumeric() or int(choice) > len(lobbies):
+        while not choice.isnumeric() or int(choice) > len(lobbies) or choice == '0':
             if choice == 'r':
-                return 'MENU'
+                return 'HOST'
                 
             elif choice == 'd':
                 # TODO: Implement disband
@@ -79,9 +79,6 @@ class Host:
             print('Invalid option')
             choice = input('\n> ')
             print()
-        
-        if choice == '0':
-            return 'HOST'
         
         # TODO: Implement kick
         
