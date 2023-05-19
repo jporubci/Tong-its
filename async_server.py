@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# async_main.py
+# async_server.py
 
 import asyncio
 import sys
@@ -34,7 +34,7 @@ class Host:
     
     
     # Host a lobby
-    async def host(self):
+    async def host(self, stdin_reader):
         
         if self.prev_state == 'MENU':
             # Program listens for incoming connections
@@ -71,10 +71,11 @@ class Host:
         
         # Wait for user input
         print('\n> ', end='')
-        stdin_reader = await self._read_input()
+        #stdin_reader = await self._read_input()
         choice = None
         while not choice:
-            choice = (await stdin_reader.readline()).decode().strip()
+            choice = (await stdin_reader.readline()).decode()
+        choice = choice.strip()
         print()
         
         # Parse user input
@@ -94,31 +95,20 @@ class Host:
             elif choice == 'q':
                 return 'QUIT'
             
-            print('Invalid option')
+            print(f'Invalid option \'{choice}\'')
             
             # Wait for user input
             print('\n> ', end='')
-            stdin_reader = await self._read_input()
             choice = None
             while not choice:
-                choice = (await stdin_reader.readline()).decode().strip()
+                choice = (await stdin_reader.readline()).decode()
+            choice = choice.strip()
             print()
             
         # TODO: Implement kick
         #
         
         return 'HOST'
-    
-    
-    # Reads input without blocking
-    async def _read_input(self):
-        # https://stackoverflow.com/a/64317899
-        loop = asyncio.get_event_loop()
-        stdin_reader = asyncio.StreamReader()
-        protocol = asyncio.StreamReaderProtocol(stdin_reader)
-        await loop.connect_read_pipe(lambda: protocol, sys.stdin)
-        
-        return stdin_reader
     
     
     # Handle incoming connection attempt from client
@@ -316,7 +306,7 @@ class Client:
         self.writer = None
     
     
-    async def waiting(self):
+    async def waiting(self, stdin_reader):
         # If trying to join a lobby
         if self.prev_state == 'MENU':
             
@@ -381,23 +371,23 @@ class Client:
                     
                     # Wait for user input
                     print('\n> ', end='')
-                    stdin_reader = await self._read_input()
                     choice = None
                     while not choice:
-                        choice = (await stdin_reader.readline()).decode().strip()
+                        choice = (await stdin_reader.readline()).decode()
+                    choice = choice.strip()
                     print()
                     
                     # Parse user input
                     while all(choice != option for option in ('r', 'l', 'q')):
                         
-                        print('Invalid option')
+                        print(f'Invalid option \'{choice}\'')
                         
                         # Wait for user input
                         print('\n> ', end='')
-                        stdin_reader = await self._read_input()
                         choice = None
                         while not choice:
-                            choice = (await stdin_reader.readline()).decode().strip()
+                            choice = (await stdin_reader.readline()).decode()
+                        choice = choice.strip()
                         print()
                     
                     if choice == 'r':
@@ -500,17 +490,6 @@ class Client:
     # Output for consistent error logging
     def _get_catalog_fail():
         print('Fatal error: failed to get catalog from catalog server')
-    
-    
-    # Reads input without blocking
-    async def _read_input(self):
-        # https://stackoverflow.com/a/64317899
-        loop = asyncio.get_event_loop()
-        stdin_reader = asyncio.StreamReader()
-        protocol = asyncio.StreamReaderProtocol(stdin_reader)
-        await loop.connect_read_pipe(lambda: protocol, sys.stdin)
-        
-        return stdin_reader
 
 
 class Player:
@@ -533,7 +512,7 @@ class Player:
         self.host_port = None
     
     
-    async def menu(self):
+    async def menu(self, stdin_reader):
         lobbies = await self._display_lobbies()
         if lobbies == None:
             return 'QUIT'
@@ -542,17 +521,31 @@ class Player:
         print('r: refresh')
         print('q: quit')
         
-        choice = input('\n> ')
+        # Wait for user input
+        print('\n> ', end='')
+        choice = None
+        while not choice:
+            choice = (await stdin_reader.readline()).decode()
+        choice = choice.strip()
         print()
+        
+        # Parse user input
         while not choice.isnumeric() or int(choice) > len(lobbies):
+            
             if choice == 'r':
                 return 'MENU'
                 
             elif choice == 'q':
                 return 'QUIT'
             
-            print('Invalid option')
-            choice = input('\n> ')
+            print(f'Invalid option \'{choice}\'')
+            
+            # Wait for user input
+            print('\n> ', end='')
+            choice = None
+            while not choice:
+                choice = (await stdin_reader.readline()).decode()
+            choice = choice.strip()
             print()
         
         if choice == '0':
@@ -565,8 +558,8 @@ class Player:
         self.host_port = lobbies[int(choice) - 1]['port']
         
         return 'WAITING'
-
-
+    
+    
     async def _display_lobbies(self):
         # Try to get catalog within time limit
         try:
@@ -590,8 +583,8 @@ class Player:
             print(f'{i}: {lobby["owner"]} - {lobby["address"]}:{lobby["port"]} [{lobby["num_clients"]}/{self.MAX_CLIENTS}]')
         
         return lobbies
-
-
+    
+    
     async def _get_catalog(self):
         http_conn = http.client.HTTPConnection(self.CATALOG_SERVER)
         http_conn.request('GET', '/query.json')
@@ -599,8 +592,8 @@ class Player:
         http_conn.close()
         
         return response
-
-
+    
+    
     def _parse_catalog(self, response):
         lobbies = list()
         
@@ -630,14 +623,26 @@ class Player:
         lobbies.sort(key=lambda x: x['lastheardfrom'], reverse=True)
         
         return lobbies
-
-
+    
+    
     def _get_catalog_fail():
         print('Fatal error: failed to get catalog from catalog server')
 
 
+# Reads input without blocking
+async def _read_input():
+    # https://stackoverflow.com/a/64317899
+    loop = asyncio.get_event_loop()
+    stdin_reader = asyncio.StreamReader()
+    protocol = asyncio.StreamReaderProtocol(stdin_reader)
+    await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+    
+    return stdin_reader
+
+
 async def main():
     player = Player()
+    stdin_reader = await _read_input()
     
     while player.curr_state != 'QUIT':
         
@@ -646,21 +651,21 @@ async def main():
             if player.prev_state == 'HOST' or player.prev_state == 'WAITING':
                 player = Player()
             
-            next_state = await player.menu()
+            next_state = await player.menu(stdin_reader)
         
         elif player.curr_state == 'HOST':
             
             if player.prev_state == 'MENU':
                 player = Host(player)
             
-            next_state = await player.host()
+            next_state = await player.host(stdin_reader)
         
         elif player.curr_state == 'WAITING':
             
             if player.prev_state == 'MENU':
                 player = Client(player)
             
-            next_state = await player.waiting()
+            next_state = await player.waiting(stdin_reader)
         
         elif player.curr_state == 'SETUP':
             next_state = await player.setup()

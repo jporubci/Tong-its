@@ -2,4 +2,12 @@
 
 TODO:
 
-* Set a limit to the amount of time a client waits for a response when joining a lobby, refresh the lobby list after said time, return if the lobby is full, retry if the lobby is not full, and return after a number of retries.
+* Client leave implementation
+* Client quit implementation
+* Client catch ConnectionResetError Connection lost error 
+* Host kick implementation
+* Host disband implementation
+* Host start implementation
+* Host check time since last ping from client
+* Host probably will need to catch ConnectionResetError Connection lost error as well, since client can disconnect within ping interval (ping is only auto-kick for disconnected clients)
+* Host needs to end \_serve\_client() coroutine when client disconnects
