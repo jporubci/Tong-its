@@ -2,8 +2,10 @@
 
 # async_server.py
 
+import locale
 import asyncio
 import sys
+import curses
 import time
 import os
 import json
@@ -23,6 +25,7 @@ class Host:
         self.prev_state = player.prev_state
         self.curr_state = player.curr_state
         self.name = player.name
+        self.input_buffer = player.input_buffer
         
         self.server = None
         self.addr = None
@@ -70,12 +73,11 @@ class Host:
         print('q: quit')
         
         # Wait for user input
-        print('\n> ', end='')
-        #stdin_reader = await self._read_input()
-        choice = None
-        while not choice:
-            choice = (await stdin_reader.readline()).decode()
-        choice = choice.strip()
+        print(f'\n> {self.input_buffer}', end='')
+        while self.input_buffer == '' or self.input_buffer[-1] != '\n':
+            self.input_buffer += (await stdin_reader.readexactly(1)).decode()
+        choice = self.input_buffer.strip()
+        self.input_buffer = ''
         print()
         
         # Parse user input
@@ -98,11 +100,12 @@ class Host:
             print(f'Invalid option \'{choice}\'')
             
             # Wait for user input
-            print('\n> ', end='')
-            choice = None
-            while not choice:
-                choice = (await stdin_reader.readline()).decode()
-            choice = choice.strip()
+            print(f'\n> {self.input_buffer}', end='')
+            while self.input_buffer == '' or self.input_buffer[-1] != '\n':
+                self.input_buffer += (await stdin_reader.readexactly(1)).decode()
+                print(self.input_buffer)
+            choice = self.input_buffer.strip()
+            self.input_buffer = ''
             print()
             
         # TODO: Implement kick
@@ -128,9 +131,36 @@ class Host:
                 
                 # Send response
                 response = str(json.dumps({'command': 'join', 'status': 'success'}))
-                response_size = len(response.encode()).to_bytes(8, 'big')
-                writer.write(response_size + response.encode())
+                response_size = len(response.encode(locale.getpreferredencoding())).to_bytes(8, 'big')
+                writer.write(response_size + response.encode(locale.getpreferredencoding()))
                 await writer.drain()
+                
+                # Refresh display
+                #################
+                os.system('clear')
+                # Get the list of lobbies and display them
+                lobbies = await self._display_lobbies()
+                if lobbies == None:
+                    return 'QUIT'
+                
+                # Display own lobby and kick options
+                print()
+                print(self.name)
+                for i, client in enumerate(self.clients):
+                    print(f'{i}: {client[0]}')
+                print()
+                
+                # Display options
+                print('r: refresh')
+                print('d: disband')
+                print('s: start')
+                print('q: quit')
+                
+                # Wait for user input
+                print(f'\n> {self.input_buffer}', end='')
+                #################
+                
+                
                 
                 # Serve client asynchronously from here on out
                 self.clients[-1].append(asyncio.create_task(self._serve_client(len(self.clients) - 1)))
@@ -139,8 +169,8 @@ class Host:
                 
                 # Send response
                 response = str(json.dumps({'command': 'join', 'status': 'failure'}))
-                response_size = len(response.encode()).to_bytes(8, 'big')
-                writer.write(response_size + response.encode())
+                response_size = len(response.encode(locale.getpreferredencoding())).to_bytes(8, 'big')
+                writer.write(response_size + response.encode(locale.getpreferredencoding()))
                 await writer.drain()
                 
                 # Close connection
@@ -176,8 +206,8 @@ class Host:
                     # Send response
                     async with self.clients_lock:
                         response = str(json.dumps({'command': 'get_client_names', 'status': 'success', 'client_names': client_names}))
-                    response_size = len(response.encode()).to_bytes(8, 'big')
-                    writer.write(response_size + response.encode())
+                    response_size = len(response.encode(locale.getpreferredencoding())).to_bytes(8, 'big')
+                    writer.write(response_size + response.encode(locale.getpreferredencoding()))
                     await writer.drain()
                 
                 elif message['command'] == 'leave':
@@ -193,7 +223,7 @@ class Host:
     # Try to register with catalog server
     def _register(self):
         try:
-            return socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(str(json.dumps({'type': self.ENTRY_TYPE, 'owner': os.getlogin(), 'port': self.port, 'num_clients': len(self.clients)})).encode(), (self.CATALOG_SERVER[:-5], int(self.CATALOG_SERVER[-4:])))
+            return socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(str(json.dumps({'type': self.ENTRY_TYPE, 'owner': os.getlogin(), 'port': self.port, 'num_clients': len(self.clients)})).encode(locale.getpreferredencoding()), (self.CATALOG_SERVER[:-5], int(self.CATALOG_SERVER[-4:])))
         
         except:
             self._register_fail()
@@ -218,13 +248,14 @@ class Host:
         
         # Try to get catalog within time limit
         try:
+            '''
             # Python 3.10
             response = await asyncio.wait_for(self._get_catalog(), timeout=self.DELAY)
             # Python 3.11
             '''
-            async with asyncio.timeout(DELAY):
+            async with asyncio.timeout(self.DELAY):
                 response = await self._get_catalog()
-            '''
+        
         except TimeoutError:
             self._get_catalog_fail()
             return None
@@ -298,6 +329,7 @@ class Client:
         self.prev_state = player.prev_state
         self.curr_state = player.curr_state
         self.name = player.name
+        self.input_buffer = player.input_buffer
         self.host_name = player.host_name
         self.host_addr = player.host_addr
         self.host_port = player.host_port
@@ -315,8 +347,8 @@ class Client:
             
             # Send name to host
             message = str(json.dumps({'command': 'join', 'name': self.name}))
-            message_size = len(message.encode()).to_bytes(8, 'big')
-            self.writer.write(message_size + message.encode())
+            message_size = len(message.encode(locale.getpreferredencoding())).to_bytes(8, 'big')
+            self.writer.write(message_size + message.encode(locale.getpreferredencoding()))
             await self.writer.drain()
             
             # Get response
@@ -340,8 +372,8 @@ class Client:
             
             # Request client names
             message = str(json.dumps({'command': 'get_client_names'}))
-            message_size = len(message.encode()).to_bytes(8, 'big')
-            self.writer.write(message_size + message.encode())
+            message_size = len(message.encode(locale.getpreferredencoding())).to_bytes(8, 'big')
+            self.writer.write(message_size + message.encode(locale.getpreferredencoding()))
             await self.writer.drain()
             
             # Get response
@@ -370,11 +402,11 @@ class Client:
                     print('q: quit')
                     
                     # Wait for user input
-                    print('\n> ', end='')
-                    choice = None
-                    while not choice:
-                        choice = (await stdin_reader.readline()).decode()
-                    choice = choice.strip()
+                    print(f'\n> {self.input_buffer}', end='')
+                    while self.input_buffer == '' or self.input_buffer[-1] != '\n':
+                        self.input_buffer += (await stdin_reader.readexactly(1)).decode()
+                    choice = self.input_buffer.strip()
+                    self.input_buffer = ''
                     print()
                     
                     # Parse user input
@@ -383,11 +415,11 @@ class Client:
                         print(f'Invalid option \'{choice}\'')
                         
                         # Wait for user input
-                        print('\n> ', end='')
-                        choice = None
-                        while not choice:
-                            choice = (await stdin_reader.readline()).decode()
-                        choice = choice.strip()
+                        print(f'\n> {self.input_buffer}', end='')
+                        while self.input_buffer == '' or self.input_buffer[-1] != '\n':
+                            self.input_buffer += (await stdin_reader.readexactly(1)).decode()
+                        choice = self.input_buffer.strip()
+                        self.input_buffer = ''
                         print()
                     
                     if choice == 'r':
@@ -415,8 +447,8 @@ class Client:
             await asyncio.sleep(self.PING_INTERVAL)
             # Ping host
             message = str(json.dumps({'command': 'ping'}))
-            message_size = len(message.encode()).to_bytes(8, 'big')
-            self.writer.write(message_size + message.encode())
+            message_size = len(message.encode(locale.getpreferredencoding())).to_bytes(8, 'big')
+            self.writer.write(message_size + message.encode(locale.getpreferredencoding()))
             await self.writer.drain()
     
     
@@ -425,13 +457,14 @@ class Client:
         
         # Try to get catalog within time limit
         try:
+            '''
             # Python 3.10
             response = await asyncio.wait_for(self._get_catalog(), timeout=self.DELAY)
+            '''
             # Python 3.11
-            '''
-            async with asyncio.timeout(DELAY):
+            async with asyncio.timeout(self.DELAY):
                 response = await self._get_catalog()
-            '''
+        
         except TimeoutError:
             self._get_catalog_fail()
             return None
@@ -506,27 +539,29 @@ class Player:
         self.curr_state = 'MENU'
         self.name = os.getlogin()
         
+        self.input_buffer = ''
+        
         # Client
         self.host_name = None
         self.host_addr = None
         self.host_port = None
     
     
-    async def menu(self, stdin_reader):
+    async def menu(self, stdin_reader, stdscr):
         lobbies = await self._display_lobbies()
         if lobbies == None:
             return 'QUIT'
-        
-        print('0: host')
-        print('r: refresh')
-        print('q: quit')
+        stdscr.addstr('0: host\n')
+        stdscr.addstr('r: refresh\n')
+        stdscr.addstr('q: quit\n')
+        stdscr.refresh()
         
         # Wait for user input
-        print('\n> ', end='')
-        choice = None
-        while not choice:
-            choice = (await stdin_reader.readline()).decode()
-        choice = choice.strip()
+        print(f'\n> {self.input_buffer}', end='')
+        while self.input_buffer == '' or self.input_buffer[-1] != '\n':
+            self.input_buffer += (await stdin_reader.readexactly(1)).decode()
+        choice = self.input_buffer.strip()
+        self.input_buffer = ''
         print()
         
         # Parse user input
@@ -541,11 +576,11 @@ class Player:
             print(f'Invalid option \'{choice}\'')
             
             # Wait for user input
-            print('\n> ', end='')
-            choice = None
-            while not choice:
-                choice = (await stdin_reader.readline()).decode()
-            choice = choice.strip()
+            print(f'\n> {self.input_buffer}', end='')
+            while self.input_buffer == '' or self.input_buffer[-1] != '\n':
+                self.input_buffer += (await stdin_reader.readexactly(1)).decode()
+            choice = self.input_buffer.strip()
+            self.input_buffer = ''
             print()
         
         if choice == '0':
@@ -563,13 +598,13 @@ class Player:
     async def _display_lobbies(self):
         # Try to get catalog within time limit
         try:
+            '''
             # Python 3.10
             response = await asyncio.wait_for(self._get_catalog(), timeout=self.DELAY)
+            '''
             # Python 3.11
-            '''
-            async with asyncio.timeout(DELAY):
+            async with asyncio.timeout(self.DELAY):
                 response = await self._get_catalog()
-            '''
         
         except TimeoutError:
             self._get_catalog_fail()
@@ -640,7 +675,7 @@ async def _read_input():
     return stdin_reader
 
 
-async def main():
+async def main(stdscr):
     player = Player()
     stdin_reader = await _read_input()
     
@@ -651,7 +686,7 @@ async def main():
             if player.prev_state == 'HOST' or player.prev_state == 'WAITING':
                 player = Player()
             
-            next_state = await player.menu(stdin_reader)
+            next_state = await player.menu(stdin_reader, stdscr)
         
         elif player.curr_state == 'HOST':
             
@@ -678,5 +713,13 @@ async def main():
         player.curr_state = next_state
 
 
+def execution(stdscr):
+    curses.echo()
+    asyncio.run(main(stdscr))
+
+
 # Execution
-asyncio.run(main())
+locale.setlocale(locale.LC_ALL, '')
+stdscr = curses.initscr()
+stdscr.clear()
+curses.wrapper(execution)
