@@ -54,7 +54,7 @@ async def hostState(state_info):
     state_info.stdscr.refresh()
     
     # Parse user input
-    if not choice.isnumeric() or int(choice) > len(lobbies) or choice == '0':
+    if not choice.isnumeric() or int(choice) > len(state_info.lobbies) or choice == '0':
         
         if choice == 'r':
             await state_info.get_lobbies()
@@ -178,7 +178,7 @@ async def displayJoin(state_info):
     
     # Display host name
     state_info.stdscr.addch('\n')
-    state_info.stdscr.addstr(f'{self.host_name}\n')
+    state_info.stdscr.addstr(f'{state_info.host_name}\n')
     
     # Display client names
     for client_name in state_info.client_names:
@@ -560,8 +560,10 @@ class StateInfo:
     # Handle incoming connection attempt from client
     async def handle_client(self, reader, writer):
         
-        state_info.stdscr.addstr(state_info.server)
-        state_info.stdscr.refresh()
+        self.stdscr.refresh()
+        self.stdscr.addstr('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n')
+        self.stdscr.refresh()
+        time.sleep(2)
         
         await self.clients_lock.acquire()
         
