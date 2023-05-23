@@ -30,6 +30,7 @@ async def hostState(state_info):
     char = state_info.stdscr.getch()
     while char == -1:
         char = state_info.stdscr.getch()
+        await asyncio.sleep(0)
     
     if chr(char) != '\n':
         # Update internal buffer
@@ -58,7 +59,10 @@ async def hostState(state_info):
         
         elif choice == 'd':
             # TODO: Implement disband
-            pass
+            #
+            state_info.curr_state = 'MENU'
+            async with state_info.clients_lock:
+                state_info.shutdown_host()
         
         elif choice == 's':
             # TODO: Implement start
@@ -67,7 +71,7 @@ async def hostState(state_info):
         elif choice == 'q':
             state_info.curr_state = 'QUIT'
             async with state_info.clients_lock:
-                await state_info.shutdown_host()
+                state_info.shutdown_host()
         
         state_info.stdscr_lock.release()
         
@@ -87,7 +91,7 @@ async def displayHost(state_info):
         state_info.curr_state = 'QUIT'
         # Shutdown host coroutines and clear host state
         async with state_info.clients_lock:
-            await state_info.shutdown_host()
+            state_info.shutdown_host()
         return
     
     # Display lobbies (without an index)
@@ -145,13 +149,13 @@ async def joinState(state_info):
         state_info.curr_state = 'MENU'
         # TODO: Implement leave - need to send message to host
         #
-        await state_info.shutdown_client()
+        state_info.shutdown_client()
     
     elif choice == 'q':
         state_info.curr_state = 'QUIT'
         # TODO: Implement quit - need to send message to host
         #
-        await state_info.shutdown_client()
+        state_info.shutdown_client()
     
     state_info.stdscr_lock.release()
     
@@ -169,7 +173,7 @@ async def displayJoin(state_info):
     # Check client names
     if state_info.client_names == None:
         state_info.curr_state = 'MENU'
-        await state_info.shutdown_client()
+        state_info.shutdown_client()
         return
     
     # Display lobbies
@@ -253,7 +257,7 @@ async def menuState(state_info):
             
             # Shutdown host coroutines and clear host state
             async with state_info.clients_lock:
-                await state_info.shutdown_host()
+                state_info.shutdown_host()
             
             return state_info
         
@@ -268,8 +272,10 @@ async def menuState(state_info):
         if state_info.lobbies == None:
             state_info.curr_state = 'QUIT'
             async with state_info.clients_lock:
-                await state_info.shutdown_host()
+                state_info.shutdown_host()
             return state_info
+        
+        state_info.curr_state = 'HOST'
         
         return state_info
     
@@ -287,9 +293,7 @@ async def menuState(state_info):
     state_info.writer.write(message_size + message.encode())
     await state_info.writer.drain()
     
-    # Get response
-    response_size = int.from_bytes((await state_info.reader.readexactly(8)), 'big')
-    response = json.loads((await state_info.reader.readexactly(response_size)).decode())
+    response = await state_info.get_message()
     
     # Parse response
     if all(key in response for key in ('command', 'status')):
@@ -300,7 +304,7 @@ async def menuState(state_info):
             if state_info.client_names == None:
                 # Error joining lobby
                 state_info.curr_state = 'MENU'
-                await state_info.shutdown_client()
+                state_info.shutdown_client()
                 return state_info
             
             # Register every PING_INTERVAL seconds
@@ -311,7 +315,7 @@ async def menuState(state_info):
     
     # Error joining lobby
     state_info.curr_state = 'MENU'
-    await state_info.shutdown_client()
+    state_info.shutdown_client()
     return state_info
 
 
@@ -367,7 +371,7 @@ class Settings:
     def __init__(self):
         self.ENTRY_TYPE = 'Tong-its'
         self.CATALOG_SERVER = 'catalog.cse.nd.edu:9097'
-        self.REGISTER_INTERVAL = 60
+        self.REGISTER_INTERVAL = 30
         self.PING_INTERVAL = 5
         self.DELAY = 1
         self.MIN_CLIENTS = 2
@@ -479,6 +483,22 @@ class StateInfo:
                 self.stdscr.addstr(f'{lobby["owner"]} - {lobby["address"]}:{lobby["port"]} [{lobby["num_clients"]}/{self.settings.MAX_CLIENTS}]\n')
     
     
+    async def get_message(self):
+        try:
+            async with asyncio.timeout(self.settings.DELAY):
+                # Get response
+                response_size = int.from_bytes((await self.reader.readexactly(8)), 'big')
+                return json.loads((await self.reader.readexactly(response_size)).decode())
+        
+        except TimeoutError:
+            response = dict()
+        
+        except:
+            response = dict()
+        
+        return response
+    
+    
     # Ping host every PING_INTERVAL seconds
     async def ping_interval(self):
         while True:
@@ -509,7 +529,8 @@ class StateInfo:
         while True:
             await asyncio.sleep(self.settings.REGISTER_INTERVAL)
             async with self.clients_lock:
-                self.register()
+                if self.register() == 0:
+                    return
     
     
     # Output for consistent error logging
@@ -563,7 +584,7 @@ class StateInfo:
     # Handle incoming connection attempt from client
     async def handle_client(self, reader, writer):
         
-        await self.clients_lock.acquire()
+        #await self.clients_lock.acquire()
         
         # Get message
         message_size = int.from_bytes((await reader.readexactly(8)), 'big')
@@ -580,8 +601,8 @@ class StateInfo:
                 self.curr_state = 'QUIT'
                 
                 # Shutdown host coroutines and clear host state
-                await self.shutdown_host()
-                self.clients_lock.release()
+                self.shutdown_host()
+                #self.clients_lock.release()
                 
                 return
             
@@ -610,7 +631,7 @@ class StateInfo:
             writer.close()
             await writer.wait_closed()
         
-        self.clients_lock.release()
+        #self.clients_lock.release()
     
     
     async def get_client_names(self):
@@ -621,8 +642,7 @@ class StateInfo:
         await self.writer.drain()
         
         # Get response
-        response_size = int.from_bytes((await self.reader.readexactly(8)), 'big')
-        response = json.loads((await self.reader.readexactly(response_size)).decode())
+        response = await self.get_message()
         
         # Parse response
         if all(key in response for key in ('command', 'status', 'client_names')):
@@ -634,9 +654,9 @@ class StateInfo:
     
     
     # Requires clients_lock!
-    async def shutdown_host(self):
+    def shutdown_host(self):
         for i in range(len(self.clients)):
-            if len(client) == 4:
+            if len(self.clients[i]) == 4:
                 self.clients[i][-1].cancel()
         
         if self.register_task != None:
@@ -650,7 +670,7 @@ class StateInfo:
         self.clients = list()
     
     
-    async def shutdown_client(self):
+    def shutdown_client(self):
         self.host_name = None
         self.host_addr = None
         self.host_port = None
