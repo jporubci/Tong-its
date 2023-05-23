@@ -573,8 +573,8 @@ class StateInfo:
             # If the entry dict has the necessary keys
             if all(key in entry for key in ('type', 'lastheardfrom', 'num_clients', 'address', 'port', 'owner')):
                 
-                # If the entry is an open lobby (correct type, not stale, not full) TODO: I changed the num_clients so it shows full lobbies :P
-                if entry['type'] == self.settings.ENTRY_TYPE and entry['lastheardfrom'] >= time.time_ns() / 1000000000.0 - self.settings.REGISTER_INTERVAL - self.settings.DELAY and entry['num_clients'] <= self.settings.MAX_CLIENTS:
+                # If the entry is an open lobby (correct type, not stale, not full)
+                if entry['type'] == self.settings.ENTRY_TYPE and entry['lastheardfrom'] >= time.time_ns() / 1000000000.0 - self.settings.REGISTER_INTERVAL - self.settings.DELAY and entry['num_clients'] < self.settings.MAX_CLIENTS:
                     
                     # Ensure entry is most recent entry of its kind
                     most_recent = True
