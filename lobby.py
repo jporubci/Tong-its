@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 # lobby.py
 
-# To encode strings with one of the system's available encodings, for curses
-import locale
-
 # To read stdin and write stdout without blocking 
 import curses
 
@@ -69,7 +66,8 @@ async def hostState(state_info):
         
         elif choice == 'q':
             state_info.curr_state = 'QUIT'
-            await state_info.shutdown_host()
+            async with state_info.clients_lock:
+                await state_info.shutdown_host()
         
         state_info.stdscr_lock.release()
         
@@ -88,7 +86,8 @@ async def displayHost(state_info):
     if state_info.lobbies == None:
         state_info.curr_state = 'QUIT'
         # Shutdown host coroutines and clear host state
-        await state_info.shutdown_host()
+        async with state_info.clients_lock:
+            await state_info.shutdown_host()
         return
     
     # Display lobbies (without an index)
@@ -98,7 +97,7 @@ async def displayHost(state_info):
     state_info.stdscr.addch('\n')
     state_info.stdscr.addstr(f'{state_info.name}\n')
     async with state_info.clients_lock:
-        for i, client in enumerate(state_info.clients):
+        for i, client in enumerate(state_info.clients, start=1):
             state_info.stdscr.addstr(f'{i}: {client[0]}\n')
     state_info.stdscr.addch('\n')
     
@@ -253,7 +252,8 @@ async def menuState(state_info):
             state_info.curr_state = 'QUIT'
             
             # Shutdown host coroutines and clear host state
-            await state_info.shutdown_host()
+            async with state_info.clients_lock:
+                await state_info.shutdown_host()
             
             return state_info
         
@@ -267,10 +267,10 @@ async def menuState(state_info):
         await state_info.get_lobbies()
         if state_info.lobbies == None:
             state_info.curr_state = 'QUIT'
-            await state_info.shutdown_host()
+            async with state_info.clients_lock:
+                await state_info.shutdown_host()
             return state_info
         
-        state_info.curr_state = 'HOST'
         return state_info
     
     # Save lobby choice
@@ -279,12 +279,12 @@ async def menuState(state_info):
     state_info.host_port = state_info.lobbies[int(choice) - 1]['port']
     
     # Try to connect to chosen lobby
-    state_info.reader, state_info.writer = await asyncio.open_connection(state_info.host_addr, state_info.host_port)
+    state_info.reader, state_info.writer = await asyncio.open_connection(host=state_info.host_addr, port=state_info.host_port)
     
     # Send name to host
     message = str(json.dumps({'command': 'join', 'name': state_info.name}))
-    message_size = len(message.encode(locale.getpreferredencoding())).to_bytes(8, 'big')
-    state_info.writer.write(message_size + message.encode(locale.getpreferredencoding()))
+    message_size = len(message.encode()).to_bytes(8, 'big')
+    state_info.writer.write(message_size + message.encode())
     await state_info.writer.drain()
     
     # Get response
@@ -409,6 +409,7 @@ class StateInfo:
         self.writer = None
     
     
+    # Requires stdscr_lock!
     async def get_lobbies(self):
         # Try to get catalog within time limit
         try:
@@ -466,6 +467,7 @@ class StateInfo:
     
     def _get_catalog_fail(self):
         self.stdscr.addstr('Fatal error: failed to get catalog from catalog server\n')
+        self.stdscr.refresh()
     
     
     def display_lobbies(self, indexed=False):
@@ -483,8 +485,8 @@ class StateInfo:
             await asyncio.sleep(self.settings.PING_INTERVAL)
             # Ping host
             message = str(json.dumps({'command': 'ping'}))
-            message_size = len(message.encode(locale.getpreferredencoding())).to_bytes(8, 'big')
-            self.writer.write(message_size + message.encode(locale.getpreferredencoding()))
+            message_size = len(message.encode()).to_bytes(8, 'big')
+            self.writer.write(message_size + message.encode())
             await self.writer.drain()
     
     
@@ -492,7 +494,7 @@ class StateInfo:
     # Try to register with catalog server
     def register(self):
         try:
-            return socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(str(json.dumps({'type': self.settings.ENTRY_TYPE, 'owner': self.name, 'port': self.port, 'num_clients': len(self.clients)})).encode(locale.getpreferredencoding()), (self.settings.CATALOG_SERVER[:-5], int(self.settings.CATALOG_SERVER[-4:])))
+            return socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(str(json.dumps({'type': self.settings.ENTRY_TYPE, 'owner': self.name, 'port': self.port, 'num_clients': len(self.clients)})).encode(), (self.settings.CATALOG_SERVER[:-5], int(self.settings.CATALOG_SERVER[-4:])))
         
         except asyncio.CancelledError:
             return 0
@@ -513,6 +515,7 @@ class StateInfo:
     # Output for consistent error logging
     def _register_fail(self):
         self.stdscr.addstr('Fatal error: failed to register with catalog server\n')
+        self.stdscr.refresh()
     
     
     # Listen to messages from client
@@ -544,8 +547,8 @@ class StateInfo:
                     
                     # Send response
                     response = str(json.dumps({'command': 'get_client_names', 'status': 'success', 'client_names': client_names}))
-                    response_size = len(response.encode(locale.getpreferredencoding())).to_bytes(8, 'big')
-                    writer.write(response_size + response.encode(locale.getpreferredencoding()))
+                    response_size = len(response.encode()).to_bytes(8, 'big')
+                    writer.write(response_size + response.encode())
                     await writer.drain()
                 
                 elif message['command'] == 'leave':
@@ -559,11 +562,6 @@ class StateInfo:
     
     # Handle incoming connection attempt from client
     async def handle_client(self, reader, writer):
-        
-        self.stdscr.refresh()
-        self.stdscr.addstr('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n')
-        self.stdscr.refresh()
-        time.sleep(2)
         
         await self.clients_lock.acquire()
         
@@ -579,19 +577,18 @@ class StateInfo:
             
             # Try to register with catalog server
             if self.register() == 0:
-                self.clients_lock.release()
-                
                 self.curr_state = 'QUIT'
                 
                 # Shutdown host coroutines and clear host state
                 await self.shutdown_host()
+                self.clients_lock.release()
                 
                 return
             
             # Send response
             response = str(json.dumps({'command': 'join', 'status': 'success'}))
-            response_size = len(response.encode(locale.getpreferredencoding())).to_bytes(8, 'big')
-            writer.write(response_size + response.encode(locale.getpreferredencoding()))
+            response_size = len(response.encode()).to_bytes(8, 'big')
+            writer.write(response_size + response.encode())
             await writer.drain()
             
             # Refresh display
@@ -605,8 +602,8 @@ class StateInfo:
             
             # Send response
             response = str(json.dumps({'command': 'join', 'status': 'failure'}))
-            response_size = len(response.encode(locale.getpreferredencoding())).to_bytes(8, 'big')
-            writer.write(response_size + response.encode(locale.getpreferredencoding()))
+            response_size = len(response.encode()).to_bytes(8, 'big')
+            writer.write(response_size + response.encode())
             await writer.drain()
             
             # Close connection
@@ -619,8 +616,8 @@ class StateInfo:
     async def get_client_names(self):
         # Request client names
         message = str(json.dumps({'command': 'get_client_names'}))
-        message_size = len(message.encode(locale.getpreferredencoding())).to_bytes(8, 'big')
-        self.writer.write(message_size + message.encode(locale.getpreferredencoding()))
+        message_size = len(message.encode()).to_bytes(8, 'big')
+        self.writer.write(message_size + message.encode())
         await self.writer.drain()
         
         # Get response
@@ -636,11 +633,11 @@ class StateInfo:
         self.client_names = None
     
     
+    # Requires clients_lock!
     async def shutdown_host(self):
-        async with self.clients_lock:
-            for client in self.clients:
-                if len(client) == 4:
-                    client[-1].cancel()
+        for i in range(len(self.clients)):
+            if len(client) == 4:
+                self.clients[i][-1].cancel()
         
         if self.register_task != None:
             self.register_task.cancel()
@@ -650,8 +647,7 @@ class StateInfo:
         self.addr = None
         self.port = None
         
-        async with self.clients_lock:
-            self.clients_list = list()
+        self.clients = list()
     
     
     async def shutdown_client(self):
@@ -691,6 +687,5 @@ def main(stdscr):
 
 
 if __name__ == '__main__':
-    locale.setlocale(locale.LC_ALL, '')
     stdscr = curses.initscr()
     curses.wrapper(main)
