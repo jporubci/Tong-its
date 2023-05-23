@@ -51,24 +51,67 @@ async def hostState(state_info):
     state_info.stdscr.addch('\n')
     state_info.stdscr.refresh()
     
+    await state_info.clients_lock.acquire()
+    
     # Parse user input
-    if not choice.isnumeric() or int(choice) > len(state_info.lobbies) or choice == '0':
+    if not choice.isnumeric() or int(choice) > len(state_info.clients) or choice == '0':
         
         if choice == 'r':
             await state_info.get_lobbies()
+            state_info.clients_lock.release()
         
         elif choice == 'd':
-            # TODO: Implement disband
-            #
+            # Kick all clients
+            message = str(json.dumps({'command': 'kick'}))
+            message_size = len(message.encode()).to_bytes(8, 'big')
+            
+            clients = [client for client in state_info.clients]
+            clients.sort(key=lambda x: x[3])
+            
+            for client in clients:
+                client[2].write(message_size + message.encode())
+                await client[2].drain()
+                
+                # Cancel serving coro
+                state_info.clients[client]['task'].cancel()
+                # Remove client
+                del state_info.clients[client]
+            
+            state_info.clients_lock.release()
+            
+            state_info.register()
+            await state_info.get_lobbies()
+            
+            # Return to menu
             state_info.curr_state = 'MENU'
             async with state_info.clients_lock:
                 state_info.shutdown_host()
         
         elif choice == 's':
             # TODO: Implement start
-            pass
+            state_info.clients_lock.release()
         
         elif choice == 'q':
+            # Kick all clients
+            message = str(json.dumps({'command': 'kick'}))
+            message_size = len(message.encode()).to_bytes(8, 'big')
+            
+            clients = [client for client in state_info.clients]
+            
+            for client in clients:
+                client[2].write(message_size + message.encode())
+                await client[2].drain()
+                
+                # Cancel serving coro
+                state_info.clients[client]['task'].cancel()
+                # Remove client
+                del state_info.clients[client]
+            
+            state_info.clients_lock.release()
+            
+            state_info.register()
+            await state_info.get_lobbies()
+            
             state_info.curr_state = 'QUIT'
             async with state_info.clients_lock:
                 state_info.shutdown_host()
@@ -77,10 +120,36 @@ async def hostState(state_info):
         
         return state_info
         
-    state_info.stdscr_lock.release()
+    # Kick client
+    message = str(json.dumps({'command': 'kick'}))
+    message_size = len(message.encode()).to_bytes(8, 'big')
     
-    # TODO: Implement kick
-    #
+    clients = [client for client in state_info.clients]
+    clients.sort(key=lambda x: x[3])
+    
+    clients[int(choice) - 1][2].write(message_size + message.encode())
+    await clients[int(choice) - 1][2].drain()
+    
+    # Cancel serving coro
+    state_info.clients[clients[int(choice) - 1]]['task'].cancel()
+    # Remove client
+    del state_info.clients[clients[int(choice) - 1]]
+    
+    # Send refresh request to all other clients
+    message = str(json.dumps({'command': 'refresh'}))
+    message_size = len(message.encode()).to_bytes(8, 'big')
+    
+    clients.pop(int(choice) - 1)
+    for client in clients:
+        client[2].write(message_size + message.encode())
+        await client[2].drain()
+    
+    state_info.clients_lock.release()
+    
+    state_info.register()
+    await state_info.get_lobbies()
+    
+    state_info.stdscr_lock.release()
     
     return state_info
 
@@ -101,8 +170,11 @@ async def displayHost(state_info):
     state_info.stdscr.addch('\n')
     state_info.stdscr.addstr(f'{state_info.name}\n')
     async with state_info.clients_lock:
-        for i, client in enumerate(state_info.clients, start=1):
-            state_info.stdscr.addstr(f'{i}: {client[0]}\n')
+        clients = [client for client in state_info.clients]
+        clients.sort(key=lambda x: x[3])
+        client_names = [client[0] for client in clients]
+        for i, client_name in enumerate(client_names, start=1):
+            state_info.stdscr.addstr(f'{i}: {client_name}\n')
     state_info.stdscr.addch('\n')
     
     # Display options
@@ -121,6 +193,11 @@ async def joinState(state_info):
     char = state_info.stdscr.getch()
     while char == -1:
         await asyncio.sleep(0)
+        if state_info.curr_state == 'MENU': 
+            state_info.shutdown_client()
+            await state_info.get_lobbies()
+            return state_info
+        
         char = state_info.stdscr.getch()
     
     if chr(char) != '\n':
@@ -148,14 +225,26 @@ async def joinState(state_info):
     
     elif choice == 'l':
         state_info.curr_state = 'MENU'
-        # TODO: Implement leave - need to send message to host
-        #
+        
+        # Send leave message to host
+        message = str(json.dumps({'command': 'leave'}))
+        message_size = len(message.encode()).to_bytes(8, 'big')
+        state_info.writer.write(message_size + message.encode())
+        await state_info.writer.drain()
+        
         state_info.shutdown_client()
+        
+        await state_info.get_lobbies()
     
     elif choice == 'q':
         state_info.curr_state = 'QUIT'
-        # TODO: Implement quit - need to send message to host
-        #
+        
+        # Send leave message to host
+        message = str(json.dumps({'command': 'leave'}))
+        message_size = len(message.encode()).to_bytes(8, 'big')
+        state_info.writer.write(message_size + message.encode())
+        await state_info.writer.drain()
+        
         state_info.shutdown_client()
     
     state_info.stdscr_lock.release()
@@ -269,6 +358,9 @@ async def menuState(state_info):
         # Register every REGISTER_INTERVAL seconds
         state_info.register_task = asyncio.create_task(state_info.register_interval())
         
+        # Check all pings every PING_INTERVAL seconds
+        state_info.check_ping_task = asyncio.create_task(state_info.check_pings())
+        
         # Get lobbies (should see self in list of lobbies)
         await state_info.get_lobbies()
         if state_info.lobbies == None:
@@ -301,6 +393,12 @@ async def menuState(state_info):
     if all(key in response for key in ('command', 'status')):
         if response['command'] == 'join' and response['status'] == 'success':
             
+            async with state_info.stdscr_lock:
+                state_info.stdscr.addstr(f'LOBBIES START\n')
+                state_info.stdscr.refresh()
+            
+            #time.sleep(2)
+            
             # Refresh lobby
             await state_info.get_lobbies()
             if state_info.lobbies == None:
@@ -308,13 +406,28 @@ async def menuState(state_info):
                 state_info.shutdown_client()
                 return state_info
             
+            async with state_info.stdscr_lock:
+                state_info.stdscr.addstr(f'CLIENT NAMES START\n')
+                state_info.stdscr.refresh()
+            
+            #time.sleep(2)
+            # Listen to host for refresh requests or kicks
+            state_info.listen_task = asyncio.create_task(state_info.listen_to_host())
+            
             # Get client names
-            await state_info.get_client_names()
+            #await state_info.get_client_names()
+            await asyncio.sleep(1)
             if state_info.client_names == None:
                 # Error joining lobby
                 state_info.curr_state = 'MENU'
                 state_info.shutdown_client()
                 return state_info
+            
+            async with state_info.stdscr_lock:
+                state_info.stdscr.addstr(f'DONE\n')
+                state_info.stdscr.refresh()
+            
+            #time.sleep(2)
             
             # Register every PING_INTERVAL seconds
             state_info.ping_task = asyncio.create_task(state_info.ping_interval())
@@ -381,7 +494,7 @@ class Settings:
         self.ENTRY_TYPE = 'Tong-its'
         self.CATALOG_SERVER = 'catalog.cse.nd.edu:9097'
         self.REGISTER_INTERVAL = 30
-        self.PING_INTERVAL = 5
+        self.PING_INTERVAL = 1
         self.DELAY = 1
         self.MIN_CLIENTS = 2
         self.MAX_CLIENTS = 2
@@ -409,14 +522,16 @@ class StateInfo:
         self.addr = None
         self.port = None
         self.register_task = None
+        self.check_ping_task = None
         self.clients_lock = asyncio.Lock()
-        self.clients = list()
+        self.clients = dict()
         
         # Client
         self.host_name = None
         self.host_addr = None
         self.host_port = None
         self.client_names = None
+        self.listen_task = None
         self.ping_task = None
         self.reader = None
         self.writer = None
@@ -457,8 +572,8 @@ class StateInfo:
             # If the entry dict has the necessary keys
             if all(key in entry for key in ('type', 'lastheardfrom', 'num_clients', 'address', 'port', 'owner')):
                 
-                # If the entry is an open lobby (correct type, not stale, not full)
-                if entry['type'] == self.settings.ENTRY_TYPE and entry['lastheardfrom'] >= time.time_ns() / 1000000000.0 - self.settings.REGISTER_INTERVAL and entry['num_clients'] < self.settings.MAX_CLIENTS:
+                # If the entry is an open lobby (correct type, not stale, not full) TODO: I changed the num_clients so it shows full lobbies :P
+                if entry['type'] == self.settings.ENTRY_TYPE and entry['lastheardfrom'] >= time.time_ns() / 1000000000.0 - self.settings.REGISTER_INTERVAL - self.settings.DELAY and entry['num_clients'] <= self.settings.MAX_CLIENTS:
                     
                     # Ensure entry is most recent entry of its kind
                     most_recent = True
@@ -519,6 +634,47 @@ class StateInfo:
             await self.writer.drain()
     
     
+    # Check clients' last pings every PING_INTERVAL seconds
+    async def check_pings(self):
+        while True:
+            await asyncio.sleep(self.settings.PING_INTERVAL)
+            
+            await self.stdscr_lock.acquire()
+            
+            async with self.clients_lock:
+                num_clients = len(self.clients)
+                
+                # Check all pings
+                clients = [client for client in self.clients]
+                for client in clients:
+                    if self.clients[client]['lastping'] < time.time_ns() / 1000000000.0 - self.settings.PING_INTERVAL - self.settings.DELAY:
+                        # Kick client
+                        message = str(json.dumps({'command': 'kick'}))
+                        message_size = len(message.encode()).to_bytes(8, 'big')
+                        client[2].write(message_size + message.encode())
+                        await client[2].drain()
+                        
+                        # Cancel serving coro
+                        self.clients[client]['task'].cancel()
+                        # Remove client
+                        self.clients.pop(client)
+                
+                # If number of clients changed (if some were kicked)
+                if len(self.clients) != num_clients:
+                    # Register
+                    self.register()
+                    
+                    # Refresh display
+                    await self.get_lobbies()
+                    self.stdscr.clear()
+                    self.clients_lock.release()
+                    await self.state_funcs_dict['HOST'][0](self)
+                    await self.clients_lock.acquire()
+                    self.stdscr.refresh()
+            
+            self.stdscr_lock.release()
+    
+    
     # Requires self.clients_lock!
     # Try to register with catalog server
     def register(self):
@@ -548,18 +704,47 @@ class StateInfo:
         self.stdscr.refresh()
     
     
-    # Listen to messages from client
-    async def _serve_client(self, i):
+    async def _listen_for_message(self):
+        # Listen for a message
+        response_size = int.from_bytes((await self.reader.readexactly(8)), 'big')
+        return response_size
+    
+    
+    async def listen_to_host(self):
         
         while True:
-            # Make sure to keep reader operations outside of lock so you don't hold onto the lock for so long
-            # TODO: I'm pretty sure this violates the lock tho
-            async with self.clients_lock:
-                reader = self.clients[i][1]
+            response_size = await self._listen_for_message()
+            response = json.loads((await self.reader.readexactly(response_size)).decode())
+            
+            if 'command' in response and response['command'] == 'refresh':
+                async with self.stdscr_lock:
+                    await self.get_lobbies()
+                    await self.get_client_names()
+                    
+                    self.stdscr.clear()
+                    await self.state_funcs_dict['JOIN'][0](self)
+                    self.stdscr.refresh()
+            
+            elif 'command' in response and response['command'] == 'kick':
+                async with self.stdscr_lock:
+                    self.curr_state = 'MENU'
+                    return
+            elif 'command' in response and response['command'] == 'get_client_names':
+                if response['command'] == 'get_client_names' and response['status'] == 'success':
+                    self.client_names = response['client_names']
+                else:
+                    self.client_names = None
+    
+    # Listen to messages from client
+    async def _serve_client(self, client):
+        
+        while True:
+            
+            # 'client' is a tuple with 'name', 'reader', 'writer', and 'join_time'
             
             # Get message
-            message_size = int.from_bytes((await reader.readexactly(8)), 'big')
-            message = json.loads((await reader.readexactly(message_size)).decode())
+            message_size = int.from_bytes((await client[1].readexactly(8)), 'big')
+            message = json.loads((await client[1].readexactly(message_size)).decode())
             
             # Parse message
             if 'command' in message:
@@ -570,28 +755,51 @@ class StateInfo:
                 
                 elif message['command'] == 'get_client_names':
                     
-                    # TODO: I'm pretty sure this violates the lock
                     async with self.clients_lock:
-                        writer = self.clients[i][2]
-                        client_names = [client[0] for client in self.clients]
+                        clients = [c for c in self.clients]
+                        clients.sort(key=lambda x: x[3])
+                    
+                    client_names = [c[0] for c in clients]
                     
                     # Send response
                     response = str(json.dumps({'command': 'get_client_names', 'status': 'success', 'client_names': client_names}))
                     response_size = len(response.encode()).to_bytes(8, 'big')
-                    writer.write(response_size + response.encode())
-                    await writer.drain()
+                    client[2].write(response_size + response.encode())
+                    await client[2].drain()
                 
                 elif message['command'] == 'leave':
-                    # TODO: Implement removal of client
-                    #
+                    
+                    async with self.clients_lock:
+                        del self.clients[client]
+                        
+                        # Register with catalog to send update
+                        self.register()
+                        
+                        # Send refresh command
+                        response = str(json.dumps({'command': 'refresh'}))
+                        response_size = len(response.encode()).to_bytes(8, 'big')
+                        for client in self.clients:
+                            client[2].write(response_size + response.encode())
+                            await client[2].drain()
+                        
+                    # Terminate
+                    async with self.stdscr_lock:
+                        await self.get_lobbies()
+                        self.stdscr.clear()
+                        await self.state_funcs_dict['HOST'][0](self)
+                        self.stdscr.refresh()
+                    
+                    return
                 
                 elif message['command'] == 'ping':
-                    # TODO: Implement ping
-                    pass
+                    async with self.clients_lock:
+                        self.clients[client]['lastping'] = time.time_ns() / 1000000000.0
     
     
     # Handle incoming connection attempt from client
     async def handle_client(self, reader, writer):
+        
+        await self.stdscr_lock.acquire()
         
         await self.clients_lock.acquire()
         
@@ -602,8 +810,13 @@ class StateInfo:
         # Parse message
         if all(key in message for key in ('command', 'name')) and message['command'] == 'join' and len(self.clients) < self.settings.MAX_CLIENTS:
             
+            join_time = time.time_ns() / 1000000000.0
+            
             # Accept client
-            self.clients.append([message['name'], reader, writer])
+            client = (message['name'], reader, writer, join_time)
+            
+            # Serve client asynchronously from here on out
+            self.clients[client] = {'task': asyncio.create_task(self._serve_client(client)), 'lastping': join_time}
             
             # Try to register with catalog server
             if self.register() == 0:
@@ -611,6 +824,8 @@ class StateInfo:
                 
                 # Shutdown host coroutines and clear host state
                 self.shutdown_host()
+                
+                self.stdscr_lock.release()
                 self.clients_lock.release()
                 
                 return
@@ -621,16 +836,26 @@ class StateInfo:
             writer.write(response_size + response.encode())
             await writer.drain()
             
+            self.stdscr_lock.release()
+            self.clients_lock.release()
+            
+            # Send refresh request to all clients
+            async with self.clients_lock:
+                message = str(json.dumps({'command': 'refresh'}))
+                message_size = len(message.encode()).to_bytes(8, 'big')
+                
+                for c in self.clients:
+                    c[2].write(message_size + message.encode())
+                    await c[2].drain()
+            
             # Refresh display
-            await self.get_lobbies()
-            # Feels dangerous to grab lock inside lower level function
             async with self.stdscr_lock:
+                await self.get_lobbies()
                 self.stdscr.clear()
                 await self.state_funcs_dict[self.curr_state][0](self)
                 self.stdscr.refresh()
             
-            # Serve client asynchronously from here on out
-            self.clients[-1].append(asyncio.create_task(self._serve_client(len(self.clients) - 1)))
+            return
         
         else:
             
@@ -644,6 +869,7 @@ class StateInfo:
             writer.close()
             await writer.wait_closed()
         
+        self.stdscr_lock.release()
         self.clients_lock.release()
     
     
@@ -668,20 +894,22 @@ class StateInfo:
     
     # Requires clients_lock!
     def shutdown_host(self):
-        for i in range(len(self.clients)):
-            if len(self.clients[i]) == 4:
-                self.clients[i][-1].cancel()
+        for client in self.clients:
+            self.clients[client]['task'].cancel()
         
         if self.register_task != None:
             self.register_task.cancel()
             self.register_task = None
         
+        if self.check_ping_task != None:
+            self.check_ping_task.cancel()
+            self.check_ping_task = None
+        
         self.server = None
         self.addr = None
         self.port = None
         
-        self.clients = list()
-        self.clients_
+        self.clients = dict()
     
     
     def shutdown_client(self):
@@ -689,6 +917,10 @@ class StateInfo:
         self.host_addr = None
         self.host_port = None
         self.client_names = None
+        
+        if self.listen_task != None:
+            self.listen_task.cancel()
+            self.listen_task = None
         
         if self.ping_task != None:
             self.ping_task.cancel()
