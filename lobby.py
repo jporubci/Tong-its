@@ -222,6 +222,7 @@ async def joinState(state_info):
     if choice == 'r':
         await state_info.get_lobbies()
         await state_info.get_client_names()
+        await asyncio.sleep(1)
     
     elif choice == 'l':
         state_info.curr_state = 'MENU'
@@ -415,7 +416,7 @@ async def menuState(state_info):
             state_info.listen_task = asyncio.create_task(state_info.listen_to_host())
             
             # Get client names
-            #await state_info.get_client_names()
+            await state_info.get_client_names()
             await asyncio.sleep(1)
             if state_info.client_names == None:
                 # Error joining lobby
@@ -704,22 +705,23 @@ class StateInfo:
         self.stdscr.refresh()
     
     
-    async def _listen_for_message(self):
-        # Listen for a message
-        response_size = int.from_bytes((await self.reader.readexactly(8)), 'big')
-        return response_size
-    
-    
     async def listen_to_host(self):
         
         while True:
-            response_size = await self._listen_for_message()
+            response_size = int.from_bytes((await self.reader.readexactly(8)), 'big')
             response = json.loads((await self.reader.readexactly(response_size)).decode())
             
             if 'command' in response and response['command'] == 'refresh':
                 async with self.stdscr_lock:
                     await self.get_lobbies()
-                    await self.get_client_names()
+                    # Request client names
+                    message = str(json.dumps({'command': 'get_client_names'}))
+                    message_size = len(message.encode()).to_bytes(8, 'big')
+                    self.writer.write(message_size + message.encode())
+                    await self.writer.drain()
+                    response_size = int.from_bytes((await self.reader.readexactly(8)), 'big')
+                    response = json.loads((await self.reader.readexactly(response_size)).decode())
+                    self.client_names = response['client_names']
                     
                     self.stdscr.clear()
                     await self.state_funcs_dict['JOIN'][0](self)
@@ -881,8 +883,8 @@ class StateInfo:
         await self.writer.drain()
         
         # Get response
-        response = await self.get_message()
-        
+        #response = await self.get_message()
+        '''
         # Parse response
         if all(key in response for key in ('command', 'status', 'client_names')):
             if response['command'] == 'get_client_names' and response['status'] == 'success':
@@ -890,6 +892,7 @@ class StateInfo:
                 return
         
         self.client_names = None
+        '''
     
     
     # Requires clients_lock!
