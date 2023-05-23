@@ -29,8 +29,8 @@ async def hostState(state_info):
     # Listen for user input
     char = state_info.stdscr.getch()
     while char == -1:
-        char = state_info.stdscr.getch()
         await asyncio.sleep(0)
+        char = state_info.stdscr.getch()
     
     if chr(char) != '\n':
         # Update internal buffer
@@ -120,6 +120,7 @@ async def joinState(state_info):
     # Listen for user input
     char = state_info.stdscr.getch()
     while char == -1:
+        await asyncio.sleep(0)
         char = state_info.stdscr.getch()
     
     if chr(char) != '\n':
@@ -202,6 +203,7 @@ async def menuState(state_info):
     # Listen for user input
     char = state_info.stdscr.getch()
     while char == -1:
+        await asyncio.sleep(0)
         char = state_info.stdscr.getch()
     
     if chr(char) != '\n':
@@ -298,6 +300,13 @@ async def menuState(state_info):
     # Parse response
     if all(key in response for key in ('command', 'status')):
         if response['command'] == 'join' and response['status'] == 'success':
+            
+            # Refresh lobby
+            await state_info.get_lobbies()
+            if state_info.lobbies == None:
+                state_info.curr_state = 'QUIT'
+                state_info.shutdown_client()
+                return state_info
             
             # Get client names
             await state_info.get_client_names()
@@ -574,7 +583,7 @@ class StateInfo:
                 
                 elif message['command'] == 'leave':
                     # TODO: Implement removal of client
-                    pass
+                    #
                 
                 elif message['command'] == 'ping':
                     # TODO: Implement ping
@@ -584,7 +593,7 @@ class StateInfo:
     # Handle incoming connection attempt from client
     async def handle_client(self, reader, writer):
         
-        #await self.clients_lock.acquire()
+        await self.clients_lock.acquire()
         
         # Get message
         message_size = int.from_bytes((await reader.readexactly(8)), 'big')
@@ -602,7 +611,7 @@ class StateInfo:
                 
                 # Shutdown host coroutines and clear host state
                 self.shutdown_host()
-                #self.clients_lock.release()
+                self.clients_lock.release()
                 
                 return
             
@@ -613,8 +622,12 @@ class StateInfo:
             await writer.drain()
             
             # Refresh display
-            # TODO: Seems sus if the state changes right before this displayHost function gets called
-            #self.state_funcs_dict[self.curr_state][0](self)
+            await self.get_lobbies()
+            # Feels dangerous to grab lock inside lower level function
+            async with self.stdscr_lock:
+                self.stdscr.clear()
+                await self.state_funcs_dict[self.curr_state][0](self)
+                self.stdscr.refresh()
             
             # Serve client asynchronously from here on out
             self.clients[-1].append(asyncio.create_task(self._serve_client(len(self.clients) - 1)))
@@ -631,7 +644,7 @@ class StateInfo:
             writer.close()
             await writer.wait_closed()
         
-        #self.clients_lock.release()
+        self.clients_lock.release()
     
     
     async def get_client_names(self):
@@ -668,6 +681,7 @@ class StateInfo:
         self.port = None
         
         self.clients = list()
+        self.clients_
     
     
     def shutdown_client(self):
