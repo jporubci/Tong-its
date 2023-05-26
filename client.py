@@ -1,211 +1,108 @@
 #!/usr/bin/env python3
+# client.py
 
-import http.client
-import json
-import time
-import socket
+# To handle connections and messages asynchronously
+import asyncio
+
+# os.getlogin() to get username
 import os
 
-CATALOG_SERVER  = 'catalog.cse.nd.edu:9097'
-ENTRY_TYPE      = 'Tong-its'
-PING_INTERVAL   = 60
-READ_BLOCK_SIZE = 1<<12
-NUM_PLAYERS     = 3
+# To send and receive data structures via messages
+import json
+
+# time.time_ns() to date messages
+import time
+
+# Predefined constants
+from config import Settings
 
 class Client:
     def __init__(self):
-        self.sock = None
-        self.addr = None
-        self.port = None
+        self.name = os.getlogin()
+        self.settings = Settings()
         
+        self.host_name = None
         
-    # Retrieves list of lobbies
-    def lookup(self):
+        self.reader = None
+        self.writer = None
         
-        lobbies = list()
+        self.listen_task = None
+        self.ping_task = None
         
-        # Get catalog
-        http_conn = http.client.HTTPConnection(CATALOG_SERVER)
-        http_conn.request('GET', '/query.json')
-        
-        # Parse catalog
-        catalog = json.loads(http_conn.getresponse().read())
-        http_conn.close()
-        
-        # Iterate through catalog
-        for entry in catalog:
+        self.shutdown_flag = asyncio.Event()
+    
+    
+    # Returns message as dict
+    async def get_message(reader):
+        message_size = int.from_bytes((await reader.readexactly(8)), 'big')
+        return json.loads((await reader.readexactly(message_size)).decode())
+    
+    
+    # Sends a message
+    async def send_message(writer, message_json):
+        message = str(json.dumps(message_json)).encode()
+        message_size = len(message).to_bytes(8, 'big')
+        writer.write(message_size + message)
+        await writer.drain()
+    
+    
+    # Listen to host
+    async def listen_task(self):
+        while not self.shutdown_flag.is_set():
             
-            # If the entry dict has the necessary keys
-            if all(key in entry for key in ('type', 'address', 'port', 'lastheardfrom', 'owner', 'num_players')):
+            # Poll the shutdown flag while waiting for a message
+            while not self.reader._buffer:
+                if self.shutdown_flag.is_set():
+                    return
+            
+            # Check shutdown flag another time
+            if self.shutdown_flag.is_set():
+                break
+            
+            # Get message now that we know the buffer is not empty from having polled it previously
+            message = await self.get_message(self.reader)
+            
+            # Parse message
+            if message['command'] == 'get_client_names':
+                # Set client names
+                if message['status'] == 'success':
+                    self.client_names = message['client_names']
+                else:
+                    self.client_names = None
+            
+            elif message['command'] == 'refresh':
+                # Get client names
+                await self.send_message(self.writer, {'command': 'get_client_names'})
                 
-                # If the entry is an open lobby
-                if entry['type'] == ENTRY_TYPE and entry['lastheardfrom'] >= time.time_ns() / 1000000000.0 - PING_INTERVAL and int(entry['num_players']) < NUM_PLAYERS:
-                    
-                    # Ensure entry is most recent entry of its kind
-                    for lobby_entry in lobbies:
-                        if lobby_entry['address'] == entry['address'] and lobby_entry['port'] == entry['port'] and lobby_entry['owner'] == entry['owner']:
-                            if entry['lastheardfrom'] > lobby_entry['lastheardfrom']:
-                                lobbies.remove(lobby_entry)
-                    
-                    if entry not in lobbies:
-                        lobbies.append(entry)
-        
-        return lobbies
-        
-        
-    def connect(self, addr, port):
-        try:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.connect((addr, port))
-            self.addr = addr
-            self.port = port
+                # Set refresh_flag event to get lobbies
+                self.refresh_flag.set()
             
-            return 1
-        except:
-            self.disconnect()
+            elif message['command'] == 'kick':
+                # Trigger shutdown for this listen task
+                self.shutdown_flag.set()
         
-        
-    def disconnect(self):
-        self.sock.close()
-        self.addr = None
-        self.port = None
-        
-        
-    def send_message(self, message):
-        try:
-            message_size = len(message.encode()).to_bytes(8, 'big')
-            self.sock.sendall(message_size + message.encode())
-            return 1
+        # Shutdown
+        self.writer.close()
+        await self.writer.wait_closed()
+    
+    
+    # Ping host every PING_INTERVAL seconds
+    async def ping_task(self):
+        while not self.shutdown_flag.is_set():
             
-        except:
-            self.disconnect()
-            return 0
-        
-        
-    def get_message(self):
-        try:
-            # Get message size
-            message_size = int.from_bytes(self.sock.recv(8), 'big')
+            # Wait for PING_INTERVAL seconds
+            await asyncio.sleep(self.settings.PING_INTERVAL)
             
-            # Get message
-            message = ''
-            bytes_read = 0
-            while bytes_read < message_size:
-                message += self.sock.recv(min(READ_BLOCK_SIZE, message_size - bytes_read)).decode()
-                bytes_read += min(READ_BLOCK_SIZE, message_size - bytes_read)
-                
-            return json.loads(message)
+            # Ping host
+            await self.send_message(self.writer, {'command': 'ping'})
+    
+    
+    # Shutdown sequence
+    async def shutdown(self):
         
-        except:
-            self.disconnect()
+        # Trigger client shutdown
+        self.shutdown_flag.set()
         
-        
-    # Attempt to join a lobby and get player number
-    def join_lobby(self, lobby):
-        
-        # Try to connect to lobby host
-        if self.connect(lobby['address'], lobby['port']) == 0:
-            print('Unable to connect to lobby host\n\n')
-            return 0
-        
-        # Send name to lobby host
-        message = str(json.dumps({'name': os.getlogin()}))
-        if self.send_message(message) == 0:
-            print('Lost connection with the host\n\n')
-            return 0
-        
-        # Get player number from host
-        message = self.get_message()
-        if self.sock:
-            if 'player_num' in message:
-                return int(message['player_num'])
-        
-        # Catch-all
-        print('Unexpected error: could not get player number from host')
-        return 0
-        
-        
-    def drawCard(self, option):
-        try:
-            self.send_message(json.dumps({'command': 'drawCard', 'option': option}))
-            response = self.get_message()
-            
-            return response
-            
-        except:
-            print('Failed to get response.')
-            self.disconnect()
-            
-        return None
-        
-        
-    def expose(self, cards):
-        try:
-            self.send_message(json.dumps({'command': 'expose', 'cards': cards}))
-            response = self.get_message()
-            
-            return response
-            
-        except:
-            print('Failed to get response.')
-            self.disconnect()
-            
-        return None
-        
-        
-    def draw(self, cards):
-        try:
-            self.send_message(json.dumps({'command': 'draw'}))
-            response = self.get_message()
-            
-            return response
-            
-        except:
-            print('Failed to get response.')
-            self.disconnect()
-            
-        return None
-        
-        
-    def challenge(self):
-        try:
-            self.send_message(json.dumps({'command': 'challenge'}))
-            response = self.get_message()
-            
-            return response
-            
-        except:
-            print('Failed to get response.')
-            self.disconnect()
-            
-        return None
-        
-        
-    def fold(self):
-        try:
-            self.send_message(json.dumps({'command': 'fold'}))
-            response = self.get_message()
-            
-            return response
-            
-        except:
-            print('Failed to get response.')
-            self.disconnect()
-            
-        return None
-        
-        
-    def discardCard(self, card):
-        try:
-            self.send_message(json.dumps({'command': 'discardCard', 'card': card}))
-            response = self.get_message()
-            
-            return response
-            
-        except:
-            print('Failed to get response.')
-            self.disconnect()
-            
-        return None
-        
-        
+        # Wait for all tasks to return
+        await self.listen_task
+        await self.ping_task
