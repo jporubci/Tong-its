@@ -78,11 +78,11 @@ async def hostState(state_info):
         elif choice == 'd':
             # Shutdown host
             await state_info.handle.shutdown()
+            state_info.handle = None
             
             # Refresh lobbies after shutdown
             await state_info.get_lobbies()
             
-            # Return to menu
             state_info.curr_state = 'MENU'
         
         elif choice == 's':
@@ -92,8 +92,8 @@ async def hostState(state_info):
         elif choice == 'q':
             # Shutdown host
             await state_info.handle.shutdown()
+            state_info.handle = None
             
-            # Return to menu
             state_info.curr_state = 'QUIT'
         
         return state_info
@@ -109,6 +109,8 @@ async def hostState(state_info):
     # Trigger shutdown in client handler
     state_info.handle.clients[client]['shutdown'].set()
     
+    state_info.handle.clients_lock.release()
+    
     return state_info
 
 
@@ -118,6 +120,7 @@ async def displayHost(state_info):
         state_info.curr_state = 'QUIT'
         # Shutdown host
         await state_info.handle.shutdown()
+        state_info.handle = None
         return
     
     # Display lobbies (without an index)
@@ -151,6 +154,14 @@ async def joinState(state_info):
     while char == -1:
         await asyncio.sleep(0)
         
+        # Check if client has shutdown
+        if state_info.handle.shutdown_flag.is_set():
+            await state_info.handle.shutdown()
+            state_info.handle = None
+            await state_info.get_lobbies()
+            state_info.curr_state = 'MENU'
+            return state_info
+        
         # Refresh if needed
         if state_info.handle.refresh_flag.is_set():
             state_info.handle.refresh_flag.clear()
@@ -181,14 +192,22 @@ async def joinState(state_info):
         await state_info.get_lobbies()
         
         # Get client names
-        await send_message(state_info.handle.writer, {'command': 'get_client_names'})
+        if (await send_message(state_info.handle.writer, {'command': 'get_client_names'})) == 0:
+            # Shutdown client
+            await state_info.handle.shutdown()
+            state_info.handle = None
+            
+            state_info.curr_state = 'MENU'
     
     elif choice == 'l':
         # Send leave message to host
         await send_message(state_info.handle.writer, {'command': 'leave'})
         
+        # Shutdown client
         await state_info.handle.shutdown()
+        state_info.handle = None
         
+        # Refresh lobbies after shutdown
         await state_info.get_lobbies()
         
         state_info.curr_state = 'MENU'
@@ -197,7 +216,9 @@ async def joinState(state_info):
         # Send leave message to host
         await send_message(state_info.handle.writer, {'command': 'leave'})
         
+        # Shutdown client
         await state_info.handle.shutdown()
+        state_info.handle = None
         
         state_info.curr_state = 'QUIT'
     
@@ -208,7 +229,9 @@ async def displayJoin(state_info):
     
     # Check lobbies
     if state_info.lobbies == None:
+        # Shutdown client
         await state_info.handle.shutdown()
+        state_info.handle = None
         state_info.curr_state = 'QUIT'
         return
     
@@ -219,7 +242,9 @@ async def displayJoin(state_info):
                 await asyncio.sleep(0)
         
         except TimeoutError:
+            # Shutdown client
             await state_info.handle.shutdown()
+            state_info.handle = None
             state_info.curr_state = 'MENU'
             return
     
@@ -310,10 +335,30 @@ async def menuState(state_info):
     state_info.handle.host_name = state_info.lobbies[int(choice) - 1]['owner']
     
     # Try to connect to chosen lobby
-    state_info.handle.reader, state_info.handle.writer = await asyncio.open_connection(state_info.lobbies[int(choice) - 1]['address'], state_info.lobbies[int(choice) - 1]['port'])
+    try:
+        state_info.handle.reader, state_info.handle.writer = await asyncio.open_connection(state_info.lobbies[int(choice) - 1]['address'], state_info.lobbies[int(choice) - 1]['port'])
+    
+    except ConnectionRefusedError:
+        # Reset handle
+        state_info.handle = None
+        
+        # Refresh lobbies
+        await state_info.get_lobbies()
+        
+        # Return to MENU
+        return state_info
     
     # Send name to host
-    await send_message(state_info.handle.writer, {'command': 'join', 'name': state_info.name})
+    if (await send_message(state_info.handle.writer, {'command': 'join', 'name': state_info.name}) == 0):
+        # Error joining lobby
+        await state_info.handle.shutdown()
+        state_info.handle = None
+        
+        # Refresh lobbies
+        await state_info.get_lobbies()
+        
+        # Return to MENU
+        return state_info
     
     # Get response
     response = await get_message(state_info.handle.reader)
@@ -333,9 +378,12 @@ async def menuState(state_info):
     
     # Error joining lobby
     await state_info.handle.shutdown()
+    state_info.handle = None
     
-    state_info.curr_state = 'MENU'
+    # Refresh lobbies
+    await state_info.get_lobbies()
     
+    # Return to MENU
     return state_info
 
 
@@ -366,11 +414,13 @@ async def setState(state_info):
     # Main loop
     while state_info.curr_state != 'QUIT':
         
+        # Check if state is valid
         if state_info.curr_state not in state_info.state_funcs_dict:
             state_info.stdscr.addstr(f'Fatal error: undefined state \'{state_info.curr_state}\'\n')
             state_info.stdscr.refresh()
             break
         
+        # Save displayed state
         drawn_state = state_info.curr_state
         
         # Display current state
@@ -378,7 +428,7 @@ async def setState(state_info):
         await state_info.state_funcs_dict[state_info.curr_state][0](state_info)
         state_info.stdscr.refresh()
         
-        # If state changed (error)
+        # Evaluate whether state changed during displaying
         if state_info.curr_state != drawn_state:
             continue
         

@@ -84,7 +84,9 @@ class Host:
             return
         
         # Send acceptance response
-        await send_message(writer, {'command': 'join', 'status': 'success'})
+        if (await send_message(writer, {'command': 'join', 'status': 'success'}) == 0):
+            # Trigger shutdown on this client handle
+            self.clients[(reader, writer)]['shutdown'].set()
         
         # Set refresh_flag event to get lobbies
         self.refresh_flag.set()
@@ -93,7 +95,9 @@ class Host:
         async with self.clients_lock:
             for client in self.clients:
                 if not self.clients[client]['shutdown'].is_set():
-                    await send_message(client[1], {'command': 'refresh'})
+                    if (await send_message(client[1], {'command': 'refresh'}) == 0):
+                        # Trigger shutdown on client handle
+                        self.clients[client]['shutdown'].set()
         
         # Serve client until shutdown
         while not self.clients[(reader, writer)]['shutdown'].is_set():
@@ -120,7 +124,9 @@ class Host:
                 clients_copy.sort(key=lambda x: x['join_time'])
                 client_names = [client['name'] for client in clients_copy]
                 
-                await send_message(writer, {'command': 'get_client_names', 'status': 'success', 'client_names': client_names})
+                if (await send_message(writer, {'command': 'get_client_names', 'status': 'success', 'client_names': client_names}) == 0):
+                    # Trigger shutdown on this client handle
+                    self.clients[(reader, writer)]['shutdown'].set()
             
             elif message['command'] == 'ping':
                 # Update time last heard from client
@@ -143,7 +149,9 @@ class Host:
             
             # Send refresh command
             for client in self.clients:
-                await send_message(client[1], {'command': 'refresh'})
+                if (await send_message(client[1], {'command': 'refresh'}) == 0):
+                    # Trigger shutdown on client handle
+                    self.clients[client]['shutdown'].set()
         
         # Set refresh_flag event to get lobbies
         self.refresh_flag.set()
@@ -180,7 +188,9 @@ class Host:
                     
                     # Send refresh command
                     for client in self.clients:
-                        await send_message(client[1], {'command': 'refresh'})
+                        if (await send_message(client[1], {'command': 'refresh'}) == 0):
+                            # Trigger shutdown on client handle
+                            self.clients[client]['shutdown'].set()
                     
                     # Set refresh_flag event to get lobbies
                     self.refresh_flag.set()
@@ -194,7 +204,7 @@ class Host:
         
         # Wait for all tasks to return
         self.register_task.cancel()
-        await self.purge_task
+        self.purge_task.cancel()
         
         # Stop listening for new connections
         self.server.close()
@@ -203,6 +213,10 @@ class Host:
         # Trigger client handle shutdowns
         async with self.clients_lock:
             for client in self.clients:
+                # Kick client
+                await send_message(client[1], {'command': 'kick'})
+                
+                # Trigger shutdown for client handler
                 self.clients[client]['shutdown'].set()
         
         # Wait for all clients to self-destruct; I'm too lazy to use a condition variable

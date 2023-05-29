@@ -65,7 +65,9 @@ class Client:
             
             elif message['command'] == 'refresh':
                 # Get client names
-                await send_message(self.writer, {'command': 'get_client_names'})
+                if (await send_message(self.writer, {'command': 'get_client_names'}) == 0):
+                    # Trigger shutdown
+                    self.shutdown_flag.set()
                 
                 # Set refresh_flag event to get lobbies
                 self.refresh_flag.set()
@@ -87,7 +89,9 @@ class Client:
             await asyncio.sleep(self.settings.PING_INTERVAL)
             
             # Ping host
-            await send_message(self.writer, {'command': 'ping'})
+            if (await send_message(self.writer, {'command': 'ping'}) == 0):
+                # Trigger shutdown
+                self.shutdown_flag.set()
     
     
     # Shutdown sequence
@@ -97,5 +101,8 @@ class Client:
         self.shutdown_flag.set()
         
         # Wait for all tasks to return
-        await self.listen_task
-        await self.ping_task
+        if self.listen_task != None:
+            await self.listen_task
+        if self.ping_task != None:
+            self.ping_task.cancel()
+            #await self.ping_task

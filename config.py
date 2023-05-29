@@ -13,8 +13,14 @@ async def get_message(reader):
 async def send_message(writer, message_json):
     message = str(json.dumps(message_json)).encode()
     message_size = len(message).to_bytes(8, 'big')
-    writer.write(message_size + message)
-    await writer.drain()
+    
+    try:
+        writer.write(message_size + message)
+        await writer.drain()
+        return 1
+        
+    except (ConnectionResetError, BrokenPipeError):
+        return 0
 
 
 class Settings:
