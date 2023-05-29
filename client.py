@@ -47,7 +47,7 @@ class Client:
     
     
     # Listen to host
-    async def listen_task(self):
+    async def listen_coro(self):
         while not self.shutdown_flag.is_set():
             
             # Poll the shutdown flag while waiting for a message
@@ -87,7 +87,7 @@ class Client:
     
     
     # Ping host every PING_INTERVAL seconds
-    async def ping_task(self):
+    async def ping_coro(self):
         while not self.shutdown_flag.is_set():
             
             # Wait for PING_INTERVAL seconds

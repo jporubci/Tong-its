@@ -44,7 +44,7 @@ class Host:
     
     
     # Register with catalog server every REGISTER_INTERVAL seconds
-    async def register_task(self):
+    async def register_coro(self):
         while not self.shutdown_flag.is_set():
             await asyncio.sleep(self.settings.REGISTER_INTERVAL)
             self.register()
@@ -162,7 +162,7 @@ class Host:
     
     
     # Check clients' last pings every PING_INTERVAL seconds
-    async def purge_task(self):
+    async def purge_coro(self):
         
         while not self.shutdown_flag.is_set():
             

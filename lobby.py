@@ -98,7 +98,7 @@ async def hostState(state_info):
         return state_info
         
     # Kick client
-    clients_copy = [client for client in self.handle.clients]
+    clients_copy = [client for client in state_info.handle.clients]
     clients_copy.sort(key=lambda x: x['join_time'])
     client = clients_copy[int(choice) - 1]
     
@@ -125,8 +125,8 @@ async def displayHost(state_info):
     # Display own lobby and kick options
     state_info.stdscr.addch('\n')
     state_info.stdscr.addstr(f'{state_info.name}\n')
-    async with self.clients_lock:
-        clients_copy = [self.clients[client] for client in self.clients]
+    async with state_info.handle.clients_lock:
+        clients_copy = [state_info.handle.clients[client] for client in state_info.handle.clients]
     clients_copy.sort(key=lambda x: x['join_time'])
     client_names = [client['name'] for client in clients_copy]
     for i, client_name in enumerate(client_names, start=1):
@@ -179,7 +179,7 @@ async def joinState(state_info):
         await state_info.get_lobbies()
         
         # Get client names
-        await self.send_message(state_info.handle.writer, {'command': 'get_client_names'})
+        await state_info.send_message(state_info.handle.writer, {'command': 'get_client_names'})
     
     elif choice == 'l':
         # Send leave message to host
@@ -211,7 +211,7 @@ async def displayJoin(state_info):
         return
     
     # Check client names
-    if state_info.client_names == None:
+    if state_info.handle.client_names == None:
         await state_info.handle.shutdown()
         state_info.curr_state = 'MENU'
         return
@@ -224,7 +224,7 @@ async def displayJoin(state_info):
     state_info.stdscr.addstr(f'{state_info.host_name}\n')
     
     # Display client names
-    for client_name in state_info.client_names:
+    for client_name in state_info.handle.client_names:
         state_info.stdscr.addstr(f'{client_name}\n')
     state_info.stdscr.addch('\n')
     
@@ -281,10 +281,10 @@ async def menuState(state_info):
         state_info.handle.register()
         
         # Register every REGISTER_INTERVAL seconds
-        state_info.handle.register_task = asyncio.create_task(state_info.handle.register_task())
+        state_info.handle.register_task = asyncio.create_task(state_info.handle.register_coro())
         
         # Check all pings every PING_INTERVAL seconds
-        state_info.handle.purge_task = asyncio.create_task(state_info.handle.purge_task())
+        state_info.handle.purge_task = asyncio.create_task(state_info.handle.purge_coro())
         
         # Get lobbies (should see self in list of lobbies)
         state_info.handle.refresh_flag.clear()
@@ -312,10 +312,10 @@ async def menuState(state_info):
     if response['status'] == 'success':
         
         # Listen to host for refresh requests or kicks
-        state_info.handle.listen_task = asyncio.create_task(state_info.handle.listen_task())
+        state_info.handle.listen_task = asyncio.create_task(state_info.handle.listen_coro())
         
         # Register every PING_INTERVAL seconds
-        state_info.ping_task = asyncio.create_task(state_info.ping_task())
+        state_info.ping_task = asyncio.create_task(state_info.ping_coro())
         
         state_info.curr_state = 'JOIN'
         
