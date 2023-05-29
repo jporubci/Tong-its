@@ -1,6 +1,22 @@
 #!/usr/bin/env python3
 # config.py
 
+import json
+
+# Returns message as dict
+async def get_message(reader):
+    message_size = int.from_bytes((await reader.readexactly(8)), 'big')
+    return json.loads((await reader.readexactly(message_size)).decode())
+
+
+# Sends a message
+async def send_message(writer, message_json):
+    message = str(json.dumps(message_json)).encode()
+    message_size = len(message).to_bytes(8, 'big')
+    writer.write(message_size + message)
+    await writer.drain()
+
+
 class Settings:
     def __init__(self):
         self.ENTRY_TYPE = 'Tong-its'
@@ -10,5 +26,3 @@ class Settings:
         self.DELAY = 1
         self.MIN_CLIENTS = 2
         self.MAX_CLIENTS = 2
-
-

@@ -19,14 +19,15 @@ import json
 # time.time_ns() to date messages
 import time
 
-# Predefined constants
-from config import Settings
+# Predefined constants and helper functions
+from config import Settings, get_message, send_message
 
 class Host:
     def __init__(self):
         self.name = os.getlogin()
         self.settings = Settings()
         self.server = None
+        self.port = None
         
         self.register_task = None
         self.purge_task = None
@@ -40,7 +41,7 @@ class Host:
     
     # Register with catalog server
     def register(self):
-        socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(str(json.dumps({'type': self.settings.ENTRY_TYPE, 'owner': self.name, 'port': self.server.sockets[0].getsockname()[1], 'num_clients': len(self.clients)})).encode(), (self.settings.CATALOG_SERVER[:-5], int(self.settings.CATALOG_SERVER[-4:])))
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(str(json.dumps({'type': self.settings.ENTRY_TYPE, 'owner': self.name, 'port': self.port, 'num_clients': len(self.clients)})).encode(), (self.settings.CATALOG_SERVER[:-5], int(self.settings.CATALOG_SERVER[-4:])))
     
     
     # Register with catalog server every REGISTER_INTERVAL seconds
@@ -50,25 +51,11 @@ class Host:
             self.register()
     
     
-    # Returns message as dict
-    async def get_message(reader):
-        message_size = int.from_bytes((await reader.readexactly(8)), 'big')
-        return json.loads((await reader.readexactly(message_size)).decode())
-    
-    
-    # Sends a message
-    async def send_message(writer, message_json):
-        message = str(json.dumps(message_json)).encode()
-        message_size = len(message).to_bytes(8, 'big')
-        writer.write(message_size + message)
-        await writer.drain()
-    
-    
     # Handle incoming connection attempt from client
     async def handle_client(self, reader, writer):
         
         # Get join message
-        message = await self.get_message(reader)
+        message = await get_message(reader)
         
         # Check if lobby is not full
         async with self.clients_lock:
@@ -88,7 +75,7 @@ class Host:
         # If lobby is full
         if full:
             # Reject client
-            await self.send_message(writer, {'command': 'join', 'status': 'failure'})
+            await send_message(writer, {'command': 'join', 'status': 'failure'})
             
             # Close connection
             writer.close()
@@ -97,7 +84,7 @@ class Host:
             return
         
         # Send acceptance response
-        await self.send_message(writer, {'command': 'join', 'status': 'success'})
+        await send_message(writer, {'command': 'join', 'status': 'success'})
         
         # Set refresh_flag event to get lobbies
         self.refresh_flag.set()
@@ -106,13 +93,14 @@ class Host:
         async with self.clients_lock:
             for client in self.clients:
                 if not self.clients[client]['shutdown'].is_set():
-                    await self.send_message(client[1], {'command': 'refresh'})
+                    await send_message(client[1], {'command': 'refresh'})
         
         # Serve client until shutdown
         while not self.clients[(reader, writer)]['shutdown'].is_set():
             
             # Poll the shutdown flag while waiting for a message
             while not reader._buffer:
+                await asyncio.sleep(0)
                 if self.clients[(reader, writer)]['shutdown'].is_set():
                     break
             
@@ -121,7 +109,7 @@ class Host:
                 break
             
             # Get message now that we know the buffer is not empty from having polled it previously
-            message = await self.get_message(reader)
+            message = await get_message(reader)
             
             # Parse message
             if message['command'] == 'get_client_names':
@@ -132,7 +120,7 @@ class Host:
                 clients_copy.sort(key=lambda x: x['join_time'])
                 client_names = [client['name'] for client in clients_copy]
                 
-                await self.send_message(writer, {'command': 'get_client_names', 'status': 'success', 'client_names': client_names})
+                await send_message(writer, {'command': 'get_client_names', 'status': 'success', 'client_names': client_names})
             
             elif message['command'] == 'ping':
                 # Update time last heard from client
@@ -155,7 +143,7 @@ class Host:
             
             # Send refresh command
             for client in self.clients:
-                await self.send_message(client[1], {'command': 'refresh'})
+                await send_message(client[1], {'command': 'refresh'})
         
         # Set refresh_flag event to get lobbies
         self.refresh_flag.set()
@@ -179,7 +167,7 @@ class Host:
                     if not self.clients[client]['shutdown'].is_set():
                         if self.clients[client]['last_ping'] < stale_time:
                             # Kick client
-                            await self.send_message(client[1], {'command': 'kick'})
+                            await send_message(client[1], {'command': 'kick'})
                             
                             # Trigger shutdown for client handler
                             self.clients[client]['shutdown'].set()
@@ -192,7 +180,7 @@ class Host:
                     
                     # Send refresh command
                     for client in self.clients:
-                        await self.send_message(client[1], {'command': 'refresh'})
+                        await send_message(client[1], {'command': 'refresh'})
                     
                     # Set refresh_flag event to get lobbies
                     self.refresh_flag.set()
@@ -204,6 +192,10 @@ class Host:
         # Trigger host shutdown
         self.shutdown_flag.set()
         
+        # Wait for all tasks to return
+        self.register_task.cancel()
+        await self.purge_task
+        
         # Stop listening for new connections
         self.server.close()
         await self.server.wait_closed()
@@ -212,10 +204,6 @@ class Host:
         async with self.clients_lock:
             for client in self.clients:
                 self.clients[client]['shutdown'].set()
-        
-        # Wait for all tasks to return
-        await self.register_task
-        await self.purge_task
         
         # Wait for all clients to self-destruct; I'm too lazy to use a condition variable
         await self.clients_lock.acquire()
@@ -226,4 +214,4 @@ class Host:
         self.clients_lock.release()
         
         # Register a lie to make lobby disappear
-        socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(str(json.dumps({'type': self.settings.ENTRY_TYPE, 'owner': self.name, 'port': self.server.sockets[0].getsockname()[1], 'num_clients': self.settings.MAX_CLIENTS + 1})).encode(), (self.settings.CATALOG_SERVER[:-5], int(self.settings.CATALOG_SERVER[-4:])))
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(str(json.dumps({'type': self.settings.ENTRY_TYPE, 'owner': self.name, 'port': self.port, 'num_clients': self.settings.MAX_CLIENTS + 1})).encode(), (self.settings.CATALOG_SERVER[:-5], int(self.settings.CATALOG_SERVER[-4:])))

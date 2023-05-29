@@ -22,8 +22,8 @@ import json
 # time.time_ns() to date messages
 import time
 
-# Predefined constants
-from config import Settings
+# Predefined constants and helper functions
+from config import Settings, get_message, send_message
 
 # Host
 from host import Host
@@ -44,6 +44,7 @@ async def hostState(state_info):
         if state_info.handle.refresh_flag.is_set():
             state_info.handle.refresh_flag.clear()
             await state_info.get_lobbies()
+            return state_info
             
         char = state_info.stdscr.getch()
     
@@ -99,14 +100,14 @@ async def hostState(state_info):
         
     # Kick client
     clients_copy = [client for client in state_info.handle.clients]
-    clients_copy.sort(key=lambda x: x['join_time'])
+    clients_copy.sort(key=lambda x: state_info.handle.clients[x]['join_time'])
     client = clients_copy[int(choice) - 1]
     
     # Send kick
-    await state_info.handle.send_message(client[1], {'command': 'kick'})
+    await send_message(client[1], {'command': 'kick'})
     
     # Trigger shutdown in client handler
-    state_info.handle.clients[client].shutdown_flag.set()
+    state_info.handle.clients[client]['shutdown'].set()
     
     return state_info
 
@@ -154,6 +155,7 @@ async def joinState(state_info):
         if state_info.handle.refresh_flag.is_set():
             state_info.handle.refresh_flag.clear()
             await state_info.get_lobbies()
+            return state_info
             
         char = state_info.stdscr.getch()
     
@@ -179,11 +181,11 @@ async def joinState(state_info):
         await state_info.get_lobbies()
         
         # Get client names
-        await state_info.send_message(state_info.handle.writer, {'command': 'get_client_names'})
+        await send_message(state_info.handle.writer, {'command': 'get_client_names'})
     
     elif choice == 'l':
         # Send leave message to host
-        state_info.handle.send_message(state_info.handle.writer, {'command': 'leave'})
+        await send_message(state_info.handle.writer, {'command': 'leave'})
         
         await state_info.handle.shutdown()
         
@@ -193,7 +195,7 @@ async def joinState(state_info):
     
     elif choice == 'q':
         # Send leave message to host
-        state_info.handle.send_message(state_info.handle.writer, {'command': 'leave'})
+        await send_message(state_info.handle.writer, {'command': 'leave'})
         
         await state_info.handle.shutdown()
         
@@ -211,17 +213,22 @@ async def displayJoin(state_info):
         return
     
     # Check client names
-    if state_info.handle.client_names == None:
-        await state_info.handle.shutdown()
-        state_info.curr_state = 'MENU'
-        return
+    async with asyncio.timeout(state_info.settings.DELAY):
+        try:
+            while state_info.handle.client_names == None:
+                await asyncio.sleep(0)
+        
+        except TimeoutError:
+            await state_info.handle.shutdown()
+            state_info.curr_state = 'MENU'
+            return
     
     # Display lobbies
     state_info.display_lobbies()
     
     # Display host name
     state_info.stdscr.addch('\n')
-    state_info.stdscr.addstr(f'{state_info.host_name}\n')
+    state_info.stdscr.addstr(f'{state_info.handle.host_name}\n')
     
     # Display client names
     for client_name in state_info.handle.client_names:
@@ -277,6 +284,9 @@ async def menuState(state_info):
         # Create server object
         state_info.handle.server = await asyncio.start_server(state_info.handle.handle_client, host=socket.gethostname(), backlog=state_info.settings.MAX_CLIENTS)
         
+        # Save port for registration and shutdown
+        state_info.handle.port = state_info.handle.server.sockets[0].getsockname()[1]
+        
         # Try to register with catalog server
         state_info.handle.register()
         
@@ -303,10 +313,10 @@ async def menuState(state_info):
     state_info.handle.reader, state_info.handle.writer = await asyncio.open_connection(state_info.lobbies[int(choice) - 1]['address'], state_info.lobbies[int(choice) - 1]['port'])
     
     # Send name to host
-    await state_info.handle.send_message(state_info.handle.writer, {'command': 'join', 'name': state_info.name})
+    await send_message(state_info.handle.writer, {'command': 'join', 'name': state_info.name})
     
     # Get response
-    response = await state_info.handle.get_message(state_info.handle.reader)
+    response = await get_message(state_info.handle.reader)
     
     # Parse response
     if response['status'] == 'success':
@@ -315,7 +325,7 @@ async def menuState(state_info):
         state_info.handle.listen_task = asyncio.create_task(state_info.handle.listen_coro())
         
         # Register every PING_INTERVAL seconds
-        state_info.ping_task = asyncio.create_task(state_info.ping_coro())
+        state_info.handle.ping_task = asyncio.create_task(state_info.handle.ping_coro())
         
         state_info.curr_state = 'JOIN'
         

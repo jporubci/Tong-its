@@ -13,8 +13,8 @@ import json
 # time.time_ns() to date messages
 import time
 
-# Predefined constants
-from config import Settings
+# Predefined constants and helper functions
+from config import Settings, get_message, send_message
 
 class Client:
     def __init__(self):
@@ -22,6 +22,7 @@ class Client:
         self.settings = Settings()
         
         self.host_name = None
+        self.client_names = None
         
         self.reader = None
         self.writer = None
@@ -29,21 +30,8 @@ class Client:
         self.listen_task = None
         self.ping_task = None
         
+        self.refresh_flag = asyncio.Event()
         self.shutdown_flag = asyncio.Event()
-    
-    
-    # Returns message as dict
-    async def get_message(reader):
-        message_size = int.from_bytes((await reader.readexactly(8)), 'big')
-        return json.loads((await reader.readexactly(message_size)).decode())
-    
-    
-    # Sends a message
-    async def send_message(writer, message_json):
-        message = str(json.dumps(message_json)).encode()
-        message_size = len(message).to_bytes(8, 'big')
-        writer.write(message_size + message)
-        await writer.drain()
     
     
     # Listen to host
@@ -52,6 +40,7 @@ class Client:
             
             # Poll the shutdown flag while waiting for a message
             while not self.reader._buffer:
+                await asyncio.sleep(0)
                 if self.shutdown_flag.is_set():
                     return
             
@@ -60,19 +49,23 @@ class Client:
                 break
             
             # Get message now that we know the buffer is not empty from having polled it previously
-            message = await self.get_message(self.reader)
+            message = await get_message(self.reader)
             
             # Parse message
             if message['command'] == 'get_client_names':
                 # Set client names
                 if message['status'] == 'success':
                     self.client_names = message['client_names']
+                    
+                    # Set refresh_flag event to refresh display
+                    self.refresh_flag.set()
+                    
                 else:
                     self.client_names = None
             
             elif message['command'] == 'refresh':
                 # Get client names
-                await self.send_message(self.writer, {'command': 'get_client_names'})
+                await send_message(self.writer, {'command': 'get_client_names'})
                 
                 # Set refresh_flag event to get lobbies
                 self.refresh_flag.set()
@@ -94,7 +87,7 @@ class Client:
             await asyncio.sleep(self.settings.PING_INTERVAL)
             
             # Ping host
-            await self.send_message(self.writer, {'command': 'ping'})
+            await send_message(self.writer, {'command': 'ping'})
     
     
     # Shutdown sequence
