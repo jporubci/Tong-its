@@ -2,4 +2,4 @@
 
 TODO:
 
-* Catch ConnectionResetError Connection lost error
+* Start making the actual game!
