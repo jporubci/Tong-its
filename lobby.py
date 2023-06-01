@@ -483,7 +483,6 @@ class StateInfo:
         self.input_buffer = ''
         
         self.name = os.getlogin()
-        self.settings = Settings()
         
         self.curr_state = 'MENU'
         self.lobbies = None
@@ -495,7 +494,7 @@ class StateInfo:
     async def get_lobbies(self):
         # Try to get catalog within time limit
         try:
-            async with asyncio.timeout(self.settings.DELAY):
+            async with asyncio.timeout(Settings().DELAY):
                 response = await self._get_catalog()
         
         except TimeoutError:
@@ -507,7 +506,7 @@ class StateInfo:
     
     
     async def _get_catalog(self):
-        http_conn = http.client.HTTPConnection(self.settings.CATALOG_SERVER)
+        http_conn = http.client.HTTPConnection(Settings().CATALOG_SERVER)
         http_conn.request('GET', '/query.json')
         response = http_conn.getresponse()
         http_conn.close()
@@ -525,7 +524,7 @@ class StateInfo:
             if all(key in entry for key in ('type', 'lastheardfrom', 'num_clients', 'address', 'port', 'owner')):
                 
                 # If the entry is an open lobby (correct type, not stale, not full)
-                if entry['type'] == self.settings.ENTRY_TYPE and entry['lastheardfrom'] >= time.time_ns() / 1000000000.0 - self.settings.REGISTER_INTERVAL - self.settings.DELAY and entry['num_clients'] < self.settings.MAX_CLIENTS:
+                if entry['type'] == Settings().ENTRY_TYPE and entry['lastheardfrom'] >= time.time_ns() / 1000000000.0 - Settings().REGISTER_INTERVAL - Settings().DELAY and entry['num_clients'] < Settings().MAX_CLIENTS:
                     
                     # Ensure entry is most recent entry of its kind
                     most_recent = True
@@ -548,9 +547,9 @@ class StateInfo:
     def display_lobbies(self, indexed=False):
         for i, lobby in enumerate(self.lobbies, start=1):
             if indexed:
-                self.stdscr.addstr(f'{i}: {lobby["owner"]} - {lobby["address"]}:{lobby["port"]} [{lobby["num_clients"]}/{self.settings.MAX_CLIENTS}]\n')
+                self.stdscr.addstr(f'{i}: {lobby["owner"]} - {lobby["address"]}:{lobby["port"]} [{lobby["num_clients"]}/{Settings().MAX_CLIENTS}]\n')
             else:
-                self.stdscr.addstr(f'{lobby["owner"]} - {lobby["address"]}:{lobby["port"]} [{lobby["num_clients"]}/{self.settings.MAX_CLIENTS}]\n')
+                self.stdscr.addstr(f'{lobby["owner"]} - {lobby["address"]}:{lobby["port"]} [{lobby["num_clients"]}/{Settings().MAX_CLIENTS}]\n')
 
 
 def start_lobby(stdscr):

@@ -32,3 +32,20 @@ class Settings:
         self.DELAY = 1
         self.MIN_CLIENTS = 2
         self.MAX_CLIENTS = 2
+
+
+class Constants:
+    def __init__(self):
+        self.NUM_PLAYERS        = 3
+        self.STARTING_HAND_SIZE = 12
+        
+        self.RANKS      = [
+                            'A', '2', '3', '4', '5', '6', '7',
+                            '8', '9', '10', 'J', 'Q', 'K'
+                          ]
+        
+        self.CLUB       = '\U00002660'
+        self.SPADE      = '\U00002663'
+        self.HEART      = '\U00002665'
+        self.DIAMOND    = '\U00002666'
+        self.SUITS      = [ CLUB, SPADE, HEART, DIAMOND ]

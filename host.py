@@ -13,7 +13,7 @@ import http.client
 # os.getlogin() to get username
 import os
 
-# To send and receive data structures via messages
+# To send formatted registration messages
 import json
 
 # time.time_ns() to date messages
@@ -25,7 +25,6 @@ from config import Settings, get_message, send_message
 class Host:
     def __init__(self):
         self.name = os.getlogin()
-        self.settings = Settings()
         self.server = None
         self.port = None
         
@@ -41,13 +40,13 @@ class Host:
     
     # Register with catalog server
     def register(self):
-        socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(str(json.dumps({'type': self.settings.ENTRY_TYPE, 'owner': self.name, 'port': self.port, 'num_clients': len(self.clients)})).encode(), (self.settings.CATALOG_SERVER[:-5], int(self.settings.CATALOG_SERVER[-4:])))
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(str(json.dumps({'type': Settings().ENTRY_TYPE, 'owner': self.name, 'port': self.port, 'num_clients': len(self.clients)})).encode(), (Settings().CATALOG_SERVER[:-5], int(Settings().CATALOG_SERVER[-4:])))
     
     
     # Register with catalog server every REGISTER_INTERVAL seconds
     async def register_coro(self):
         while not self.shutdown_flag.is_set():
-            await asyncio.sleep(self.settings.REGISTER_INTERVAL)
+            await asyncio.sleep(Settings().REGISTER_INTERVAL)
             self.register()
     
     
@@ -59,7 +58,7 @@ class Host:
         
         # Check if lobby is not full
         async with self.clients_lock:
-            if not (full := len(self.clients) == self.settings.MAX_CLIENTS):
+            if not (full := len(self.clients) == Settings().MAX_CLIENTS):
                 # Accept new client
                 join_time = time.time_ns() / 1000000000.0
                 self.clients[(reader, writer)] = {
@@ -163,8 +162,8 @@ class Host:
         while not self.shutdown_flag.is_set():
             
             # Wait for PING_INTERVAL seconds
-            await asyncio.sleep(self.settings.PING_INTERVAL)
-            stale_time = time.time_ns() / 1000000000.0 - (self.settings.PING_INTERVAL + self.settings.DELAY)
+            await asyncio.sleep(Settings().PING_INTERVAL)
+            stale_time = time.time_ns() / 1000000000.0 - (Settings().PING_INTERVAL + Settings().DELAY)
             
             async with self.clients_lock:
                 # Record the starting number of clients before the purge
@@ -228,4 +227,4 @@ class Host:
         self.clients_lock.release()
         
         # Register a lie to make lobby disappear
-        socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(str(json.dumps({'type': self.settings.ENTRY_TYPE, 'owner': self.name, 'port': self.port, 'num_clients': self.settings.MAX_CLIENTS + 1})).encode(), (self.settings.CATALOG_SERVER[:-5], int(self.settings.CATALOG_SERVER[-4:])))
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(str(json.dumps({'type': Settings().ENTRY_TYPE, 'owner': self.name, 'port': self.port, 'num_clients': Settings().MAX_CLIENTS + 1})).encode(), (Settings().CATALOG_SERVER[:-5], int(Settings().CATALOG_SERVER[-4:])))

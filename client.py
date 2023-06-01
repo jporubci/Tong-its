@@ -7,9 +7,6 @@ import asyncio
 # os.getlogin() to get username
 import os
 
-# To send and receive data structures via messages
-import json
-
 # time.time_ns() to date messages
 import time
 
@@ -19,7 +16,6 @@ from config import Settings, get_message, send_message
 class Client:
     def __init__(self):
         self.name = os.getlogin()
-        self.settings = Settings()
         
         self.host_name = None
         self.client_names = None
@@ -92,7 +88,7 @@ class Client:
         while not self.shutdown_flag.is_set():
             
             # Wait for PING_INTERVAL seconds
-            await asyncio.sleep(self.settings.PING_INTERVAL)
+            await asyncio.sleep(Settings().PING_INTERVAL)
             
             # Ping host
             if (await send_message(self.writer, {'command': 'ping'}) == 0):
