@@ -202,7 +202,7 @@ class Host:
         # Trigger host shutdown
         self.shutdown_flag.set()
         
-        # Wait for all tasks to return
+        # Cancel all tasks
         self.register_task.cancel()
         self.purge_task.cancel()
         

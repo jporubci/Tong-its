@@ -86,8 +86,27 @@ async def hostState(state_info):
             state_info.curr_state = 'MENU'
         
         elif choice == 's':
-            # TODO: Implement start
-            pass
+            async with state_info.handle.clients_lock:
+                
+                # Send start message to all clients
+                num_clients = len(state_info.handle.clients)
+                for client in state_info.handle.clients:
+                    if (await send_message(client[1], {'command': 'start'}) == 0):
+                        # Kick client
+                        await send_message(client[1], {'command': 'kick'})
+                        
+                        # Trigger shutdown for client handler
+                        state_info.handle.clients[client]['shutdown'].set()
+                
+                # If all start messages sent successfully
+                if len(state_info.handle.clients) == num_clients:
+                    state_info.handle.register_task.cancel()
+                    state_info.handle.purge_task.cancel()
+                    
+                    state_info.handle.server.close()
+                    await state_info.handle.server.wait_closed()
+                    
+                    state_info.curr_state = 'START'
         
         elif choice == 'q':
             # Shutdown host
@@ -168,6 +187,13 @@ async def joinState(state_info):
             await state_info.get_lobbies()
             return state_info
             
+        # Check if game is starting
+        if state_info.handle.start_flag.is_set():
+            state_info.handle.ping_task.cancel()
+            state_info.handle.listen_task.cancel()
+            state_info.curr_state = 'START'
+            return state_info
+        
         char = state_info.stdscr.getch()
     
     if chr(char) != '\n':
@@ -412,7 +438,7 @@ async def setState(state_info):
     await state_info.get_lobbies()
     
     # Main loop
-    while state_info.curr_state != 'QUIT':
+    while all(state_info.curr_state != state for state in ('QUIT', 'START')):
         
         # Check if state is valid
         if state_info.curr_state not in state_info.state_funcs_dict:
@@ -434,6 +460,20 @@ async def setState(state_info):
         
         # Get input and transition to next state
         state_info = await state_info.state_funcs_dict[state_info.curr_state][1](state_info)
+    
+    if state_info.curr_state == 'START':
+        if type(state_info.handle) is Host:
+            async with state_info.handle.clients_lock:
+                clients = dict()
+                for client in state_info.handle.clients:
+                    clients[client] = state_info.handle.clients[client]
+            
+            return clients
+        
+        elif type(state_info.handle) is Client:
+            host = (state_info.handle.reader, state_info.handle.writer, state_info.handle.host_name)
+            
+            return host
 
 
 class StateInfo:
@@ -513,7 +553,7 @@ class StateInfo:
                 self.stdscr.addstr(f'{lobby["owner"]} - {lobby["address"]}:{lobby["port"]} [{lobby["num_clients"]}/{self.settings.MAX_CLIENTS}]\n')
 
 
-def main(stdscr):
+def start_lobby(stdscr):
     # Force curses not to do dumb stuff
     curses.use_default_colors()
     
@@ -527,14 +567,9 @@ def main(stdscr):
     state_info = StateInfo(stdscr)
     
     # Run program
-    asyncio.run(setState(state_info))
-    
-    # Give 1 second to read output before it's cleared by curses wrapper
-    stdscr.addstr('Closing program...\n')
-    stdscr.refresh()
-    time.sleep(1)
+    return asyncio.run(setState(state_info))
 
 
-if __name__ == '__main__':
+def main():
     stdscr = curses.initscr()
-    curses.wrapper(main)
+    return curses.wrapper(start_lobby)

@@ -32,6 +32,7 @@ class Client:
         
         self.refresh_flag = asyncio.Event()
         self.shutdown_flag = asyncio.Event()
+        self.start_flag = asyncio.Event()
     
     
     # Listen to host
@@ -75,6 +76,11 @@ class Client:
             elif message['command'] == 'kick':
                 # Trigger shutdown for this listen task
                 self.shutdown_flag.set()
+            
+            elif message['command'] == 'start':
+                # Set start flag
+                self.start_flag.set()
+                return
         
         # Shutdown
         self.writer.close()
@@ -100,9 +106,8 @@ class Client:
         # Trigger client shutdown
         self.shutdown_flag.set()
         
-        # Wait for all tasks to return
+        # Wait for listen task and cancel ping task
         if self.listen_task != None:
             await self.listen_task
         if self.ping_task != None:
             self.ping_task.cancel()
-            #await self.ping_task
