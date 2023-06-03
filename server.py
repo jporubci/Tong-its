@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# table.py
+# server.py
+
+# os.getlogin() to get host name
+import os
 
 # To shuffle the deck of cards
 import secrets
@@ -13,25 +16,50 @@ class Card:
         self.suit = suit
         self.points = min(max(1, Constants().RANKS.index(self.rank)), 10)
 
+# Decomposes cards
+def decompose(cards):
+    return [(card.rank, card.suit) for card in cards]
+
+# Composes cards
+def compose(cards):
+    return 
+
 
 class Player:
-    def __init__(self, hand):
-        self.hand = hand
+    def __init__(self, name):
+        # Private
+        self.hand = list()
+        
+        # Public
+        self.name = name
+        self.score = 0
         self.melds = list()
-        self.score = None
+        self.can_draw = False
+        
+        #for player in players:
+        #    player.score = sum((card.points for card in player.hand))
 
 
 class Server:
-    def __init__(self):
+    def __init__(self, clients):
+        # Private
         self.deck = self._init_deck()
+        
+        # Mixed
+        self.players = self._init_players([(None, os.getlogin())]+clients)
+        
+        # Public
         self.discard = list()
         self.order = self._init_order()
-        self.players = self._init_players()
         self.last_draw = None
+        self.end = False
+        
+        # Player index
+        self.turn = None
     
     
     # Returns a standard 52-card shuffled deck
-    def _init_deck():
+    def _init_deck(self):
         temp_deck = [Card(rank, suit) for rank in Constants().RANKS for suit in Constants().SUITS]
         deck = list()
         while temp_deck:
@@ -55,13 +83,18 @@ class Server:
     
     
     # Deal cards to players
-    def _init_players()
-        players = [Player() for _ in range(Constants().NUM_PLAYERS)]
+    def _init_players(self, clients)
+        players = [Player(clients[i][1]) for i in range(Constants().NUM_PLAYERS)]
         for _ in range(Constants().STARTING_HAND_SIZE):
             for i in self.order:
                 players[i].hand.append(self.deck.pop())
         
-        for player in players:
-            player.score = sum((card.points for card in player.hand))
-        
         return players
+    
+    
+    # Reset the game
+    def reset(self):
+        self.deck = self._init_deck()
+        self.discard = list()
+        self.players = self._init_players()
+        self.last_draw = None

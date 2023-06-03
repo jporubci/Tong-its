@@ -464,9 +464,11 @@ async def setState(state_info):
     if state_info.curr_state == 'START':
         if type(state_info.handle) is Host:
             async with state_info.handle.clients_lock:
-                clients = dict()
+                clients = list()
                 for client in state_info.handle.clients:
-                    clients[client] = state_info.handle.clients[client]
+                    clients.append((client[0], client[1], state_info.handle.clients[client]['name']))
+                
+                clients.sort(key=lambda x: state_info.handle.clients[(x[0], x[1])]['join_time'])
             
             return clients
         
