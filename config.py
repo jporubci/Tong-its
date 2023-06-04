@@ -48,4 +48,4 @@ class Constants:
         self.SPADE      = '\U00002663'
         self.HEART      = '\U00002665'
         self.DIAMOND    = '\U00002666'
-        self.SUITS      = [ CLUB, SPADE, HEART, DIAMOND ]
+        self.SUITS      = [ self.CLUB, self.SPADE, self.HEART, self.DIAMOND ]

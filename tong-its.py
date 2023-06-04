@@ -11,10 +11,10 @@ import os
 import asyncio
 
 # To send lists of cards as messages
-from server import decompose, compose
+from server import decompose, compose, Server
 
 # To simplify message sending and receiving
-from config import send_message, get_message
+from config import send_message, get_message, Constants
 
 
 # Send game state to players other than host
@@ -33,7 +33,7 @@ async def send_gamestate(ret_val, server):
             
             # Send vague info if it's not the player's own info
             else:
-                await send_message(ret_val[i-1][1], {'score': server.players[j].score, 'name': server.players[j].name, 'num_cards': len(server.players[j].hand), 'melds': [decompose(meld) for meld in server.players[j].melds], 'can_draw': server.players[j].can_draw})
+                await send_message(ret_val[i-1][1], {'score': server.players[j].score, 'name': server.players[j].name, 'num_cards': len(server.players[j].hand), 'melds': [decompose(meld) if meld else None for meld in server.players[j].melds], 'can_draw': server.players[j].can_draw})
 
 
 # Display function for host
@@ -44,7 +44,7 @@ def host_display(server):
         # Display client players's vague info in order
         print(f'{server.players[i].name}')
         print(f'Score: {server.players[i].score}')
-        print(f'Cards: {server.players[i].num_cards}')
+        print(f'Cards: {len(server.players[i].hand)}')
         
         # Display melds
         print(f'Melds:')
@@ -60,7 +60,7 @@ def host_display(server):
     # Draw self
     print(f'{server.players[0].name}')
     print(f'Score: {server.players[0].score}')
-    print(f'Cards: {server.players[0].num_cards}')
+    print(f'Cards: {len(server.players[0].hand)}')
     
     # Display melds
     print(f'Melds:')
@@ -102,7 +102,7 @@ async def main(ret_val):
         while not server.end:
             
             # Send gamestate
-            send_gamestate(ret_val, server)
+            await send_gamestate(ret_val, server)
             
             # Display game state
             os.system('clear')
@@ -110,7 +110,7 @@ async def main(ret_val):
             
             # Wait until it's your turn
             while server.order[0] != 0:
-                print(f'{server.players[server.order[0]].name\'s turn...')
+                print(f'{server.players[server.order[0]].name}\'s turn...')
                 
                 # Wait for client player to send action
                 message = await get_message(ret_val[server.order[0]-1][0])
@@ -220,7 +220,7 @@ async def main(ret_val):
                     server.order = server.order[1:] + [server.order[0]]
                 
                 # Send gamestate
-                send_gamestate(ret_val, server)
+                await send_gamestate(ret_val, server)
                 
                 # Redraw display
                 os.system('clear')
@@ -263,7 +263,7 @@ async def main(ret_val):
                 valid_meld = 0
                 
                 # Check for a 3-of-a-kind
-                for card in server.player[0].hand:
+                for card in server.players[0].hand:
                     if card.rank == server.discard[-1].rank:
                         valid_meld += 1
                         if valid_meld == 2:
@@ -273,7 +273,7 @@ async def main(ret_val):
                     valid_meld = 1
                     
                     # Check for a straight flush (discard is lowest rank)
-                    for card in server.player[0].hand:
+                    for card in server.players[0].hand:
                         if card.suit == server.discard[-1].suit:
                             if Constants().RANKS.index(card.rank) == Constants().RANKS.index(server.discard[-1].rank) + valid_meld:
                                 valid_meld += 1
@@ -284,7 +284,7 @@ async def main(ret_val):
                         valid_meld = -1
                         
                         # Check for a straight flush (discard is middle rank)
-                        for card in server.player[0].hand:
+                        for card in server.players[0].hand:
                             if card.suit == server.discard[-1].suit:
                                 if Constants().RANKS.index(card.rank) == Constants().RANKS.index(server.discard[-1].rank) + valid_meld:
                                     valid_meld += 2
@@ -295,7 +295,7 @@ async def main(ret_val):
                             valid_meld = -2
                             
                             # Check for a straight flush (discard is lowest rank)
-                            for card in server.player[0].hand:
+                            for card in server.players[0].hand:
                                 if card.suit == server.discard[-1].suit:
                                     if Constants().RANKS.index(card.rank) == Constants().RANKS.index(server.discard[-1].rank) + valid_meld:
                                         valid_meld += 1
@@ -343,7 +343,7 @@ async def main(ret_val):
                     
                     # Display enumeration for card select
                     print('  0', end='')
-                    for i in range(len(server.players[0].hand)):
+                    for i in range(1, len(server.players[0].hand)):
                         print(f' {str(i).rjust(3)}', end='')
                     print()
                     
@@ -389,7 +389,7 @@ async def main(ret_val):
             
             while server.order[0] == 0:
                 # Send gamestate
-                send_gamestate(ret_val, server)
+                await send_gamestate(ret_val, server)
                 
                 # Redraw display
                 os.system('clear')
@@ -403,9 +403,9 @@ async def main(ret_val):
                     valid_meld = 0
                     
                     # Check for a 3-of-a-kind
-                    for card in server.player[0].hand:
-                        if card != server.player[0].hand[i]:
-                            if card.rank == server.player[0].hand[i].rank:
+                    for card in server.players[0].hand:
+                        if card != server.players[0].hand[i]:
+                            if card.rank == server.players[0].hand[i].rank:
                                 valid_meld += 1
                                 if valid_meld == 2:
                                     break
@@ -414,10 +414,10 @@ async def main(ret_val):
                         valid_meld = 1
                         
                         # Check for a straight flush (i card is lowest rank)
-                        for card in server.player[0].hand:
-                            if card != server.player[0].hand[i]:
-                                if card.suit == server.player[0].hand[i].suit:
-                                    if Constants().RANKS.index(card.rank) == Constants().RANKS.index(server.player[0].hand[i].rank) + valid_meld:
+                        for card in server.players[0].hand:
+                            if card != server.players[0].hand[i]:
+                                if card.suit == server.players[0].hand[i].suit:
+                                    if Constants().RANKS.index(card.rank) == Constants().RANKS.index(server.players[0].hand[i].rank) + valid_meld:
                                         valid_meld += 1
                                         if valid_meld == 3:
                                             break
@@ -426,10 +426,10 @@ async def main(ret_val):
                             valid_meld = -1
                             
                             # Check for a straight flush (i card is middle rank)
-                            for card in server.player[0].hand:
-                                if card != server.player[0].hand[i]:
-                                    if card.suit == server.player[0].hand[i].suit:
-                                        if Constants().RANKS.index(card.rank) == Constants().RANKS.index(server.player[0].hand[i].rank) + valid_meld:
+                            for card in server.players[0].hand:
+                                if card != server.players[0].hand[i]:
+                                    if card.suit == server.players[0].hand[i].suit:
+                                        if Constants().RANKS.index(card.rank) == Constants().RANKS.index(server.players[0].hand[i].rank) + valid_meld:
                                             valid_meld += 2
                                             if valid_meld == 3:
                                                 break
@@ -438,18 +438,18 @@ async def main(ret_val):
                                 valid_meld = -2
                                 
                                 # Check for a straight flush (i card is lowest rank)
-                                for card in server.player[0].hand:
-                                    if card != server.player[0].hand[i]:
-                                        if card.suit == server.player[0].hand[i].suit:
-                                            if Constants().RANKS.index(card.rank) == Constants().RANKS.index(server.player[0].hand[i].rank) + valid_meld:
+                                for card in server.players[0].hand:
+                                    if card != server.players[0].hand[i]:
+                                        if card.suit == server.players[0].hand[i].suit:
+                                            if Constants().RANKS.index(card.rank) == Constants().RANKS.index(server.players[0].hand[i].rank) + valid_meld:
                                                 valid_meld += 1
                                                 if valid_meld == 0:
                                                     break
                     
-                    # If a valid meld was found
-                    if valid_meld >= 0:
-                        can_expose_meld = True
-                        print('0: Expose a meld')
+                # If a valid meld was found
+                if valid_meld >= 0:
+                    can_expose_meld = True
+                    print('0: Expose a meld')
                 
                 print('d: Discard a card')
                 
@@ -519,7 +519,7 @@ async def main(ret_val):
                     
                     # Display enumeration for card select
                     print('  0', end='')
-                    for i in range(len(server.players[0].hand)):
+                    for i in range(1, len(server.players[0].hand)):
                         print(f' {str(i).rjust(3)}', end='')
                     print()
                     
@@ -556,9 +556,10 @@ async def main(ret_val):
     # Client
     elif type(ret_val) is tuple:
         
-        #
+        while True:
+            pass
 
 
-if __name__ == 'main':
+if __name__ == '__main__':
     ret_val = lobby.main()
     asyncio.run(main(ret_val))

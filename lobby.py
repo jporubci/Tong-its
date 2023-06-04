@@ -262,7 +262,7 @@ async def displayJoin(state_info):
         return
     
     # Check client names
-    async with asyncio.timeout(state_info.settings.DELAY):
+    async with asyncio.timeout(Settings().DELAY):
         try:
             while state_info.handle.client_names == None:
                 await asyncio.sleep(0)
@@ -333,7 +333,7 @@ async def menuState(state_info):
         state_info.handle = Host()
         
         # Create server object
-        state_info.handle.server = await asyncio.start_server(state_info.handle.handle_client, host=socket.gethostname(), backlog=state_info.settings.MAX_CLIENTS)
+        state_info.handle.server = await asyncio.start_server(state_info.handle.handle_client, host=socket.gethostname(), backlog=Settings().MAX_CLIENTS)
         
         # Save port for registration and shutdown
         state_info.handle.port = state_info.handle.server.sockets[0].getsockname()[1]

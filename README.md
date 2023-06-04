@@ -2,4 +2,6 @@
 
 TODO:
 
-* Start making the actual game!
+* Implement client player
+* Implement Draw
+* Fix broken client coro or something

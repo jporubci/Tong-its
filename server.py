@@ -45,12 +45,13 @@ class Server:
         # Private
         self.deck = self._init_deck()
         
+        # Public
+        self.order = self._init_order()
         # Mixed
-        self.players = self._init_players([(None, os.getlogin())]+clients)
+        self.players = self._init_players([(None, None, os.getlogin())]+clients)
         
         # Public
         self.discard = list()
-        self.order = self._init_order()
         self.last_draw = None
         self.end = False
         
@@ -83,8 +84,8 @@ class Server:
     
     
     # Deal cards to players
-    def _init_players(self, clients)
-        players = [Player(clients[i][1]) for i in range(Constants().NUM_PLAYERS)]
+    def _init_players(self, clients):
+        players = [Player(clients[i][2]) for i in range(Constants().NUM_PLAYERS)]
         for _ in range(Constants().STARTING_HAND_SIZE):
             for i in self.order:
                 players[i].hand.append(self.deck.pop())
