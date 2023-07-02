@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # tong-its.py
 
+# To read stdin and write stdout without blocking 
+import curses
+
 # Import lobby.py
 import lobby
 
@@ -29,14 +32,14 @@ async def send_gamestate(ret_val, server):
             
             # Send detailed info if it's the player's own info
             if i == j:
-                await send_message(ret_val[i-1][1], {'score': server.players[j].score, 'hand': decompose(server.players[j].hand), 'melds': [decompose(meld) for meld in server.players[j].melds], 'can_draw': server.players[j].can_draw})
+                await send_message(ret_val[i-1][1], {'score': server.players[j].score, 'name': server.players[j].name, 'hand': decompose(server.players[j].hand), 'melds': [decompose(meld) for meld in server.players[j].melds], 'can_draw': server.players[j].can_draw})
             
             # Send vague info if it's not the player's own info
             else:
                 await send_message(ret_val[i-1][1], {'score': server.players[j].score, 'name': server.players[j].name, 'num_cards': len(server.players[j].hand), 'melds': [decompose(meld) if meld else None for meld in server.players[j].melds], 'can_draw': server.players[j].can_draw})
 
 
-# Display function for host
+# Display function for host (Draws other clients in turn order first, then self last)
 def host_display(server):
     # Determine client player draw order
     draw_order = server.order[server.order.index(0)+1:] + server.order[:server.order.index(0)]
@@ -64,7 +67,7 @@ def host_display(server):
     
     # Display melds
     print(f'Melds:')
-    for meld in server.players[i].melds:
+    for meld in server.players[0].melds:
         meld.sort(key=lambda x: x.suit)
         meld.sort(key=lambda x: Constants().RANKS.index(x.rank))
         print(f'{meld[0].rank.rjust(2)}{meld[0].suit}', end='')
@@ -90,7 +93,67 @@ def host_display(server):
     print('\n')
 
 
-async def main(ret_val):
+# Display function for clients (Draws other players in turn-order first, then self last)
+def client_display(gamestate, players):
+    # Determine client player draw order (order of drawing aka printing to display)
+    draw_order = gamestate['order'][gamestate['order'].index(gamestate['id'])+1:] + gamestate['order'][:gamestate['order'].index(gamestate['id'])]
+    for i in draw_order:
+        # Display client players's vague info in order
+        print(f'{players[i]["name"]}')
+        print(f'Score: {players[i]["score"]}')
+        print(f'Cards: {players[i]["num_cards"]}')
+        
+        # Display melds
+        print(f'Melds:')
+        for meld in players[i]['melds']:
+            meld.sort(key=lambda x: x[1])
+            meld.sort(key=lambda x: Constants().RANKS.index(x[0]))
+            print(f'{meld[0][0].rjust(2)}{meld[0][1]}', end='')
+            for j in range(1, len(meld)):
+                print(f'{meld[j][0].rjust(2)}{meld[j][1]}', end='')
+            print()
+        print()
+    
+    # Draw self
+    print(f'{players[gamestate["id"]]["name"]}')
+    print(f'Score: {players[gamestate["id"]]["score"]}')
+    print(f'Cards: {len(players[gamestate["id"]]["hand"])}')
+    
+    # Display melds
+    print(f'Melds:')
+    for meld in players[gamestate['id']]['melds']:
+        meld.sort(key=lambda x: x[1])
+        meld.sort(key=lambda x: Constants().RANKS.index(x[0]))
+        print(f'{meld[0][0].rjust(2)}{meld[0][1]}', end='')
+        for j in range(1, len(meld)):
+            print(f' {meld[j][0].rjust(2)}{meld[j][1]}', end='')
+        print()
+    print()
+    
+    # Display hand
+    players[gamestate['id']]['hand'].sort(key=lambda x: x[1])
+    players[gamestate['id']]['hand'].sort(key=lambda x: Constants().RANKS.index(x[0]))
+    print(f'{players[gamestate["id"]]["hand"][0][0].rjust(2)}{players[gamestate["id"]]["hand"][0][1]}', end='')
+    for i in range(1, len(players[gamestate['id']]['hand'])):
+        print(f' {players[gamestate["id"]]["hand"][i][0].rjust(2)}{players[gamestate["id"]]["hand"][i][1]}', end='')
+    print()
+    
+    # Display deck and discard
+    print(f'Deck: {gamestate["deck_size"]}')
+    print('Discard:', end='')
+    if gamestate['discard']:
+        for card in gamestate['discard']:
+            print(f' {card[0].rjust(2)}{card[1]}', end='')
+    print('\n')
+
+
+async def main(state_info):
+    
+    ret_val = await lobby.setState(state_info)
+    
+    curses.nocbreak()
+    curses.echo()
+    curses.endwin()
     
     # Host
     if type(ret_val) is list:
@@ -557,9 +620,51 @@ async def main(ret_val):
     elif type(ret_val) is tuple:
         
         while True:
-            pass
+            # Await gamestate
+            gamestate = await get_message(ret_val[0])
+            
+            # Get player info
+            players = [await get_message(ret_val[0]) for _ in range(0, len(gamestate['order']))]
+            
+            # Display game state
+            os.system('clear')
+            client_display(gamestate, players)
+            
+            # Wait until it's your turn
+            while gamestate['order'][0] != gamestate['id']:
+                print(f'{players[gamestate["order"][0]]["name"]}\'s turn...')
+                
+                # Await gamestate
+                gamestate = await get_message(ret_val[0])
+                
+                # Get player info
+                players = [await get_message(ret_val[0]) for _ in range(0, len(gamestate['order']))]
+                
+                # Redraw display
+                os.system('clear')
+                client_display(gamestate, players)
+            
+            # Client's turn
+            print("WAHOO")
+
+
+def start_game(stdscr):
+    # Force curses not to do dumb stuff
+    curses.use_default_colors()
+    
+    # Set to non-blocking
+    stdscr.nodelay(True)
+    
+    # Enable normal reading of backspace
+    stdscr.keypad(False)
+    
+    # Initialize state
+    state_info = lobby.StateInfo(stdscr)
+    
+    # Run program
+    return asyncio.run(main(state_info))
 
 
 if __name__ == '__main__':
-    ret_val = lobby.main()
-    asyncio.run(main(ret_val))
+    stdscr = curses.initscr()
+    curses.wrapper(start_game)

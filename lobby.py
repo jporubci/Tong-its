@@ -554,7 +554,7 @@ class StateInfo:
                 self.stdscr.addstr(f'{lobby["owner"]} - {lobby["address"]}:{lobby["port"]} [{lobby["num_clients"]}/{Settings().MAX_CLIENTS}]\n')
 
 
-def start_lobby(stdscr):
+async def start_lobby(stdscr):
     # Force curses not to do dumb stuff
     curses.use_default_colors()
     
@@ -568,9 +568,9 @@ def start_lobby(stdscr):
     state_info = StateInfo(stdscr)
     
     # Run program
-    return asyncio.run(setState(state_info))
+    return await setState(state_info)
 
 
-def main():
+async def main():
     stdscr = curses.initscr()
     return curses.wrapper(start_lobby)
