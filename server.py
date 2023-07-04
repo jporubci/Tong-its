@@ -18,11 +18,11 @@ class Card:
 
 # Decomposes cards
 def decompose(cards):
-    return [(card.rank, card.suit) for card in cards]
+    return [[card.rank, card.suit] for card in cards]
 
 # Composes cards
 def compose(cards):
-    return 
+    return [Card(card[0], card[1]) for card in cards]
 
 
 class Player:

@@ -135,6 +135,9 @@ class Host:
             elif message['command'] == 'leave':
                 # Trigger shutdown for this client handler
                 self.clients[(reader, writer)]['shutdown'].set()
+                
+            else:
+                return
         
         # Shutdown
         writer.close()

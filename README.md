@@ -2,6 +2,5 @@
 
 TODO:
 
-* Implement client player
 * Implement Draw
-* Fix broken client coro or something
+* Fix drawing when option not presented
