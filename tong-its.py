@@ -329,6 +329,12 @@ async def main(state_info):
                             server.players[server.order[0]].can_draw = True
                         
                         # Check if game is over
+                        if not server.players[server.order[0]].hand:
+                            winner = server.order[0]
+                            server.end = True
+                            break
+                        
+                        # Check if game is over
                         if not server.deck:
                             # Exhausted deck procedure
                             candidates = [(i, sum((card.points for card in server.players[i].hand))) for i in range(len(server.players)) if server.players[i].melds]
@@ -342,14 +348,11 @@ async def main(state_info):
                                 else:
                                     winner = server.order[1]
                             else:
-                                winner = top_candidates[0][0]
+                                if top_candidates:
+                                    winner = top_candidates[0][0]
+                                else:
+                                    winner = -2
                             
-                            server.end = True
-                            break
-                        
-                        # Check if game is over
-                        if not server.players[server.order[0]].hand:
-                            winner = server.order[0]
                             server.end = True
                             break
                         
@@ -698,6 +701,12 @@ async def main(state_info):
                             server.players[0].can_draw = True
                         
                         # Check if game is over
+                        if not server.players[0].hand:
+                            winner = 0
+                            server.end = True
+                            break
+                        
+                        # Check if game is over
                         if not server.deck:
                             # Exhausted deck procedure
                             candidates = [(i, sum((card.points for card in server.players[i].hand))) for i in range(len(server.players)) if server.players[i].melds]
@@ -711,14 +720,12 @@ async def main(state_info):
                                 else:
                                     winner = server.order[1]
                             else:
-                                winner = top_candidates[0][0]
+                                # Imagine if nobody exposed a meld.
+                                if top_candidates:
+                                    winner = top_candidates[0][0]
+                                else:
+                                    winner = -2
                             
-                            server.end = True
-                            break
-                        
-                        # Check if game is over
-                        if not server.players[0].hand:
-                            winner = 0
                             server.end = True
                             break
                         
@@ -728,14 +735,17 @@ async def main(state_info):
             # Server game ended ############################
             
             # Send gamestate
-            server.players[winner].score += 1
+            if winner != -2:
+                server.players[winner].score += 1
+                print(f'{server.players[winner].name} won (id={winner})!')
+            else:
+                print('Nobody won. Y\'all suk.')
+            
             await send_gamestate(ret_val, server, winner)
             
             # Display game state
             os.system('clear')
             host_display(server)
-            
-            print(f'{server.players[winner].name} won (id={winner})!')
             
             # Ask host if they want to host again with same players
             print('Rematch? Enter \'q\' to not rematch.')
@@ -1041,7 +1051,10 @@ async def main(state_info):
                         break
             
             # Client game ended ############################
-            print(f'{players[gamestate["winner"]]["name"]} won (id={gamestate["winner"]})!')
+            if winner != -2:
+                print(f'{players[gamestate["winner"]]["name"]} won (id={gamestate["winner"]})!')
+            else:
+                print('Nobody won. Y\'all suk.')
             
             # Send rematch response
             print('Rematch? Enter \'q\' to not rematch.')
