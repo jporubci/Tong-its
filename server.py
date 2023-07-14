@@ -26,18 +26,15 @@ def compose(cards):
 
 
 class Player:
-    def __init__(self, name):
+    def __init__(self, name, score=0):
         # Private
         self.hand = list()
         
         # Public
         self.name = name
-        self.score = 0
+        self.score = score
         self.melds = list()
         self.can_draw = False
-        
-        #for player in players:
-        #    player.score = sum((card.points for card in player.hand))
 
 
 class Server:
@@ -56,7 +53,7 @@ class Server:
         self.end = False
         
         # Player index
-        self.turn = None
+        #self.turn = None
     
     
     # Returns a standard 52-card shuffled deck
@@ -84,8 +81,8 @@ class Server:
     
     
     # Deal cards to players
-    def _init_players(self, clients):
-        players = [Player(clients[i][2]) for i in range(Constants().NUM_PLAYERS)]
+    def _init_players(self, clients, scores=[0 for _ in range(Constants().NUM_PLAYERS)]):
+        players = [Player(clients[i][2], scores[i]) for i in range(Constants().NUM_PLAYERS)]
         for _ in range(Constants().STARTING_HAND_SIZE):
             for i in self.order:
                 players[i].hand.append(self.deck.pop())
@@ -94,8 +91,11 @@ class Server:
     
     
     # Reset the game
-    def reset(self):
+    def reset(self, winner):
         self.deck = self._init_deck()
         self.discard = list()
-        self.players = self._init_players()
+        self.players = self._init_players([(None, None, os.getlogin())]+clients, [player.score for player in self.players])
         self.last_draw = None
+        self.order = self.order[self.order.index(winner):] + self.order[:len(self.order) - 1 - self.order.index(winner)]
+        self.end = False
+        
