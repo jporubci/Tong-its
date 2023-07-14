@@ -91,11 +91,11 @@ class Server:
     
     
     # Reset the game
-    def reset(self, winner):
+    def reset(self, clients, winner):
         self.deck = self._init_deck()
         self.discard = list()
         self.players = self._init_players([(None, None, os.getlogin())]+clients, [player.score for player in self.players])
         self.last_draw = None
-        self.order = self.order[self.order.index(winner):] + self.order[:len(self.order) - 1 - self.order.index(winner)]
+        self.order = self.order[self.order.index(winner):] + self.order[:self.order.index(winner)]
         self.end = False
         

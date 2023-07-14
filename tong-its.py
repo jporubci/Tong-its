@@ -45,7 +45,7 @@ def host_display(server):
     draw_order = server.order[server.order.index(0)+1:] + server.order[:server.order.index(0)]
     for i in draw_order:
         # Display client players's vague info in order
-        print(f'{server.players[i].name}')
+        print(f'{server.players[i].name} (id={i})')
         print(f'Score: {server.players[i].score}')
         print(f'Cards: {len(server.players[i].hand)}')
         
@@ -56,12 +56,12 @@ def host_display(server):
             meld.sort(key=lambda x: Constants().RANKS.index(x.rank))
             print(f'{meld[0].rank.rjust(2)}{meld[0].suit}', end='')
             for j in range(1, len(meld)):
-                print(f'{meld[j].rank.rjust(2)}{meld[j].suit}', end='')
+                print(f' {meld[j].rank.rjust(2)}{meld[j].suit}', end='')
             print()
         print()
     
     # Draw self
-    print(f'{server.players[0].name}')
+    print(f'{server.players[0].name} (id=0)')
     print(f'Score: {server.players[0].score}')
     print(f'Cards: {len(server.players[0].hand)}')
     
@@ -76,20 +76,21 @@ def host_display(server):
         print()
     print()
     
-    # Display hand
-    server.players[0].hand.sort(key=lambda x: x.suit)
-    server.players[0].hand.sort(key=lambda x: Constants().RANKS.index(x.rank))
-    print(f'{server.players[0].hand[0].rank.rjust(2)}{server.players[0].hand[0].suit}', end='')
-    for i in range(1, len(server.players[0].hand)):
-        print(f' {server.players[0].hand[i].rank.rjust(2)}{server.players[0].hand[i].suit}', end='')
-    print()
-    
     # Display deck and discard
     print(f'Deck: {len(server.deck)}')
     print('Discard:', end='')
     if server.discard:
         for card in server.discard:
             print(f' {card.rank.rjust(2)}{card.suit}', end='')
+    print('\n')
+    
+    # Display hand
+    if server.players[0].hand:
+        server.players[0].hand.sort(key=lambda x: x.suit)
+        server.players[0].hand.sort(key=lambda x: Constants().RANKS.index(x.rank))
+        print(f'Hand: {server.players[0].hand[0].rank.rjust(2)}{server.players[0].hand[0].suit}', end='')
+        for i in range(1, len(server.players[0].hand)):
+            print(f' {server.players[0].hand[i].rank.rjust(2)}{server.players[0].hand[i].suit}', end='')
     print('\n')
 
 
@@ -99,7 +100,7 @@ def client_display(gamestate, players):
     draw_order = gamestate['order'][gamestate['order'].index(gamestate['id'])+1:] + gamestate['order'][:gamestate['order'].index(gamestate['id'])]
     for i in draw_order:
         # Display client players's vague info in order
-        print(f'{players[i]["name"]}')
+        print(f'{players[i]["name"]} (id={i})')
         print(f'Score: {players[i]["score"]}')
         print(f'Cards: {players[i]["num_cards"]}')
         
@@ -110,12 +111,12 @@ def client_display(gamestate, players):
             meld.sort(key=lambda x: Constants().RANKS.index(x[0]))
             print(f'{meld[0][0].rjust(2)}{meld[0][1]}', end='')
             for j in range(1, len(meld)):
-                print(f'{meld[j][0].rjust(2)}{meld[j][1]}', end='')
+                print(f' {meld[j][0].rjust(2)}{meld[j][1]}', end='')
             print()
         print()
     
     # Draw self
-    print(f'{players[gamestate["id"]]["name"]}')
+    print(f'{players[gamestate["id"]]["name"]} (id={gamestate["id"]})')
     print(f'Score: {players[gamestate["id"]]["score"]}')
     print(f'Cards: {len(players[gamestate["id"]]["hand"])}')
     
@@ -130,20 +131,21 @@ def client_display(gamestate, players):
         print()
     print()
     
-    # Display hand
-    players[gamestate['id']]['hand'].sort(key=lambda x: x[1])
-    players[gamestate['id']]['hand'].sort(key=lambda x: Constants().RANKS.index(x[0]))
-    print(f'{players[gamestate["id"]]["hand"][0][0].rjust(2)}{players[gamestate["id"]]["hand"][0][1]}', end='')
-    for i in range(1, len(players[gamestate['id']]['hand'])):
-        print(f' {players[gamestate["id"]]["hand"][i][0].rjust(2)}{players[gamestate["id"]]["hand"][i][1]}', end='')
-    print()
-    
     # Display deck and discard
     print(f'Deck: {gamestate["deck_size"]}')
     print('Discard:', end='')
     if gamestate['discard']:
         for card in gamestate['discard']:
             print(f' {card[0].rjust(2)}{card[1]}', end='')
+    print('\n')
+    
+    # Display hand
+    if players[gamestate["id"]]["hand"]:
+        players[gamestate['id']]['hand'].sort(key=lambda x: x[1])
+        players[gamestate['id']]['hand'].sort(key=lambda x: Constants().RANKS.index(x[0]))
+        print(f'Hand: {players[gamestate["id"]]["hand"][0][0].rjust(2)}{players[gamestate["id"]]["hand"][0][1]}', end='')
+        for i in range(1, len(players[gamestate['id']]['hand'])):
+            print(f' {players[gamestate["id"]]["hand"][i][0].rjust(2)}{players[gamestate["id"]]["hand"][i][1]}', end='')
     print('\n')
 
 
@@ -586,22 +588,16 @@ async def main(state_info):
                         
                         choice = input('\n> ')
                         
-                        valid_input = choice.isnumeric() and int(choice) < len(server.players[0].hand) and find_meld(decompose(meld + [server.players[0].hand[int(choice)]]), decompose([server.players[0].hand[int(choice)]])[0])
+                        melds = [meld for player in server.players if player.melds for meld in player.melds]
+                        
+                        valid_input = choice.isnumeric() and int(choice) < len(server.players[0].hand) and not all(not find_meld(decompose(meld + [server.players[0].hand[int(choice)]]), decompose([server.players[0].hand[int(choice)]])[0]) for meld in melds)
                         
                         # Verify input
-                        while not choice.isnumeric() or int(choice) >= len(server.players[0].hand) or not valid_input:
+                        while not valid_input:
                             print('\nInvalid input')
                             choice = input('\n> ')
                             
-                            if choice.isnumeric() or int(choice) >= len(server.players[0].hand):
-                                for player in server.players:
-                                    if player.melds:
-                                        for meld in player.melds:
-                                            if find_meld(decompose(meld + [server.players[0].hand[int(choice)]]), decompose([server.players[0].hand[int(choice)]])[0]):
-                                                valid_input = True
-                                                break
-                                        if valid_input:
-                                            break
+                            valid_input = choice.isnumeric() and int(choice) < len(server.players[0].hand) and not all(not find_meld(decompose(meld + [server.players[0].hand[int(choice)]]), decompose([server.players[0].hand[int(choice)]])[0]) for meld in melds)
                         
                         # Compile viable melds
                         melds = list()
@@ -730,7 +726,9 @@ async def main(state_info):
                         server.order = server.order[1:] + [server.order[0]]
             
             # Server game ended ############################
+            
             # Send gamestate
+            server.players[winner].score += 1
             await send_gamestate(ret_val, server, winner)
             
             # Display game state
@@ -746,10 +744,12 @@ async def main(state_info):
             if choice == 'q':
                 break
             
+            print('\nAwaiting player responses...')
+            
             # Await rematch response
             all_true = True
             for i in range(1, len(server.players)):
-                response = await get_message(ret_val[i])
+                response = await get_message(ret_val[i-1][0])
                 if response['command'] == 'rematch':
                     if response['value'] != 1:
                         all_true = False
@@ -757,6 +757,9 @@ async def main(state_info):
             
             if not all_true:
                 break
+            
+            # Reset server but save score!
+            server.reset(ret_val, winner)
     
     
     # Client
@@ -949,21 +952,16 @@ async def main(state_info):
                         
                         choice = input('\n> ')
                         
-                        valid_input = choice.isnumeric() and int(choice) < len(players[gamestate['id']]['hand']) and find_meld(meld + [players[gamestate['id']]['hand'][int(choice)]], players[gamestate['id']]['hand'][int(choice)])
+                        melds = [meld for player in players if player['melds'] for meld in player['melds']]
+                        
+                        valid_input = choice.isnumeric() and int(choice) < len(players[gamestate['id']]['hand']) and not all(not find_meld(meld + [players[gamestate['id']]['hand'][int(choice)]], players[gamestate['id']]['hand'][int(choice)]) for meld in melds)
+                        
                         # Verify input
-                        while not choice.isnumeric() or int(choice) >= len(players[gamestate['id']]['hand']) or not valid_input:
+                        while not valid_input:
                             print('\nInvalid input')
                             choice = input('\n> ')
                             
-                            if choice.isnumeric() or int(choice) >= len(players[gamestate['id']]['hand']):
-                                for player in players:
-                                    if player['melds']:
-                                        for meld in player['melds']:
-                                            if find_meld(meld + [players[gamestate['id']]['hand'][int(choice)]], players[gamestate['id']]['hand'][int(choice)]):
-                                                valid_input = True
-                                                break
-                                        if valid_input:
-                                            break
+                            valid_input = choice.isnumeric() and int(choice) < len(players[gamestate['id']]['hand']) and not all(not find_meld(meld + [players[gamestate['id']]['hand'][int(choice)]], players[gamestate['id']]['hand'][int(choice)]) for meld in melds)
                         
                         # Compile viable melds
                         melds = list()
@@ -1049,13 +1047,14 @@ async def main(state_info):
             print('Rematch? Enter \'q\' to not rematch.')
             choice = input('\n> ')
             
-            # 
+            # Quit or loop again
             if choice == 'q':
-                await send_message(ret_val[0], {'command': 'rematch', 'value': 0})
+                await send_message(ret_val[1], {'command': 'rematch', 'value': 0})
                 break
             
             else:
-                await send_message(ret_val[0], {'command': 'rematch', 'value': 1})
+                await send_message(ret_val[1], {'command': 'rematch', 'value': 1})
+                print('\nAwaiting the host\'s response...')
 
 
 def start_game(stdscr):
