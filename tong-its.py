@@ -267,8 +267,7 @@ async def main(state_info):
                             break
                     
                     elif message['command'] == 'draw':
-                        # TODO: Implement Draw
-                        #
+                        winner = -3
                         server.end = True
                         break
                     
@@ -334,25 +333,9 @@ async def main(state_info):
                             server.end = True
                             break
                         
-                        # Check if game is over
+                        # Check if deck is exhausted...
                         if not server.deck:
-                            # Exhausted deck procedure
-                            candidates = [(i, sum((card.points for card in server.players[i].hand))) for i in range(len(server.players)) if server.players[i].melds]
-                            
-                            top_score = min((p[1] for p in candidates))
-                            top_candidates = [p for p in candidates if p[1] == top_score]
-                            
-                            if len(top_candidates) > 1:
-                                if server.last_draw in [p[0] for p in top_candidates]:
-                                    winner = server.last_draw
-                                else:
-                                    winner = server.order[1]
-                            else:
-                                if top_candidates:
-                                    winner = top_candidates[0][0]
-                                else:
-                                    winner = -2
-                            
+                            winner = -2
                             server.end = True
                             break
                         
@@ -414,7 +397,7 @@ async def main(state_info):
                 
                 # Get player's choice
                 choice = input('\n> ')
-                while not choice.isnumeric() or int(choice) > 2 or (int(choice) == 1 and not can_pick_discard):
+                while not choice.isnumeric() or int(choice) > 2 or (int(choice) == 1 and not can_pick_discard) or (int(choice) == 2 and not server.players[0].can_draw):
                     print('\nInvalid input')
                     choice = input('\n> ')
                 
@@ -483,8 +466,7 @@ async def main(state_info):
                         break
                 
                 elif choice == '2':
-                    # TODO: Implement draw
-                    #
+                    winner = -3
                     server.end = True
                     break
                 
@@ -708,24 +690,7 @@ async def main(state_info):
                         
                         # Check if game is over
                         if not server.deck:
-                            # Exhausted deck procedure
-                            candidates = [(i, sum((card.points for card in server.players[i].hand))) for i in range(len(server.players)) if server.players[i].melds]
-                            
-                            top_score = min((p[1] for p in candidates))
-                            top_candidates = [p for p in candidates if p[1] == top_score]
-                            
-                            if len(top_candidates) > 1:
-                                if server.last_draw in [p[0] for p in top_candidates]:
-                                    winner = server.last_draw
-                                else:
-                                    winner = server.order[1]
-                            else:
-                                # Imagine if nobody exposed a meld.
-                                if top_candidates:
-                                    winner = top_candidates[0][0]
-                                else:
-                                    winner = -2
-                            
+                            winner = -2
                             server.end = True
                             break
                         
@@ -734,16 +699,329 @@ async def main(state_info):
             
             # Server game ended ############################
             
-            # Send gamestate
-            if winner != -2:
-                server.players[winner].score += 1
-                print(f'{server.players[winner].name} won (id={winner})!')
-            else:
-                print('Nobody won. Y\'all suk.')
+            # If winner == -2, then the deck was exhausted.
+            # If winner == -3, then server.order[0] called Draw.
+            # Otherwise, winner is the winner.
             
+            # Send gamestate
             await send_gamestate(ret_val, server, winner)
             
             # Display game state
+            os.system('clear')
+            host_display(server)
+            
+            # Determine how game ended
+            if winner == -2:
+                # Exhausted deck procedure
+                # 
+                # 1. Make a list of players with exposed melds.
+                candidates = [i for i in range(len(server.players)) if server.players[i].melds]
+                
+                if not candidates:
+                    print('\nNobody exposed a meld; nobody wins.\n')
+                
+                else:
+                    # 2. If host exposed a meld, await their hand after they submit any melds.
+                    if server.players[0].melds:
+                        choice = ''
+                        while choice != 's':
+                            print()
+                            
+                            # If host has any melds to expose
+                            if can_expose_meld := find_meld(decompose(server.players[0].hand)):
+                                print('0: Expose a meld')
+                            else:
+                                print('s: Submit your hand')
+                            
+                            choice = input('\n> ')
+                            
+                            while (choice != '0' and choice != 's') or (choice == '0' and not can_expose_meld) or (choice == 's' and can_expose_meld):
+                                print('\nInvalid input')
+                                choice = input('\n> ')
+                            
+                            if choice == '0':
+                                # Display hand
+                                server.players[0].hand.sort(key=lambda x: x.suit)
+                                server.players[0].hand.sort(key=lambda x: Constants().RANKS.index(x.rank))
+                                print(f'{server.players[0].hand[0].rank.rjust(2)}{server.players[0].hand[0].suit}', end='')
+                                for i in range(1, len(server.players[0].hand)):
+                                    print(f' {server.players[0].hand[i].rank.rjust(2)}{server.players[0].hand[i].suit}', end='')
+                                print()
+                                
+                                # Display enumeration for card select
+                                print('  0', end='')
+                                for i in range(1, len(server.players[0].hand)):
+                                    print(f' {str(i).rjust(3)}', end='')
+                                print()
+                                
+                                print('\nChoose which cards you wish to meld (space-separated list of numbers)')
+                                
+                                choices = input('\n> ')
+                                
+                                # Error check input
+                                while not all(card.isnumeric() and int(card) < len(server.players[0].hand) for card in choices.split()) or not verify_meld(decompose([server.players[0].hand[int(num)] for num in choices.split()])):
+                                    print('\nInvalid input')
+                                    choices = input('\n> ')
+                                
+                                meld = decompose([server.players[0].hand[int(num)] for num in choices.split()])
+                                
+                                # Removes melded cards from hand
+                                for meld_card in meld:
+                                    if meld_card in decompose(server.players[0].hand):
+                                        for card in server.players[0].hand:
+                                            if card.rank == meld_card[0] and card.suit == meld_card[1]:
+                                                server.players[0].hand.remove(card)
+                                                break
+                                
+                                # Add meld to melds
+                                server.players[0].melds.append(compose(meld))
+                                
+                                # Refresh display
+                                os.system('clear')
+                                host_display(server)
+                    
+                    # 3. Await candidates to submit any melds before submitting their hands.
+                    for i in candidates:
+                        message = await get_message(ret_val[i-1][0])
+                        
+                        if 'melds' in message:
+                            for meld in message['melds']:
+                                # Remove cards from player's hand
+                                for meld_card in meld:
+                                    if meld_card in decompose(server.players[server.order[0]].hand):
+                                        for card in server.players[server.order[0]].hand:
+                                            if card.rank == meld_card[0] and card.suit == meld_card[1]:
+                                                server.players[server.order[0]].hand.remove(card)
+                                                break
+                                
+                                # Add meld to player's melds
+                                server.players[server.order[0]].melds.append(compose(message['cards']))
+                    
+                    # 4. Tally up the points.
+                    results = [(i, sum((card.points for card in server.players[i].hand))) for i in candidates]
+                    
+                    # 5. Compute the lowest score and filter out players with a higher score.
+                    top_score = min((r[1] for r in results))
+                    top_candidates = [r for r in results if r[1] == top_score]
+                    
+                    # 6. Break ties...
+                    if len(top_candidates) > 1:
+                        if server.last_draw in [candidate[0] for candidate in top_candidates]:
+                            winner = server.last_draw
+                        else:
+                            winner = server.order[1]
+                    
+                    # ...or simply declare the sole winner!
+                    else:
+                        winner = top_candidates[0][0]
+                    
+                    # 7. Award the winner!
+                    server.players[winner].score += 1
+                    print(f'{server.players[winner].name} won (id={winner})!\n')
+            
+            elif winner == -3:
+                # Draw procedure
+                # 
+                # 1. Check if host called Draw. If so, await their hand, then await any other hands. If not, prompt to challenge or fold.
+                challengers = list()
+                
+                # Host called Draw
+                if server.order[0] = 0:
+                    
+                    # Await their hand.
+                    choice = ''
+                    while choice != 's':
+                        print()
+                        
+                        # If host has any melds to expose
+                        if can_expose_meld := find_meld(decompose(server.players[0].hand)):
+                            print('0: Prepare a meld')
+                        else:
+                            print('s: Submit your hand')
+                        
+                        choice = input('\n> ')
+                        
+                        while (choice != '0' and choice != 's') or (choice == '0' and not can_expose_meld) or (choice == 's' and can_expose_meld):
+                            print('\nInvalid input')
+                            choice = input('\n> ')
+                        
+                        if choice == '0':
+                            # Display hand
+                            server.players[0].hand.sort(key=lambda x: x.suit)
+                            server.players[0].hand.sort(key=lambda x: Constants().RANKS.index(x.rank))
+                            print(f'{server.players[0].hand[0].rank.rjust(2)}{server.players[0].hand[0].suit}', end='')
+                            for i in range(1, len(server.players[0].hand)):
+                                print(f' {server.players[0].hand[i].rank.rjust(2)}{server.players[0].hand[i].suit}', end='')
+                            print()
+                            
+                            # Display enumeration for card select
+                            print('  0', end='')
+                            for i in range(1, len(server.players[0].hand)):
+                                print(f' {str(i).rjust(3)}', end='')
+                            print()
+                            
+                            print('\nChoose which cards you wish to meld (space-separated list of numbers)')
+                            
+                            choices = input('\n> ')
+                            
+                            # Error check input
+                            while not all(card.isnumeric() and int(card) < len(server.players[0].hand) for card in choices.split()) or not verify_meld(decompose([server.players[0].hand[int(num)] for num in choices.split()])):
+                                print('\nInvalid input')
+                                choices = input('\n> ')
+                            
+                            meld = decompose([server.players[0].hand[int(num)] for num in choices.split()])
+                            
+                            # Removes melded cards from hand
+                            for meld_card in meld:
+                                if meld_card in decompose(server.players[0].hand):
+                                    for card in server.players[0].hand:
+                                        if card.rank == meld_card[0] and card.suit == meld_card[1]:
+                                            server.players[0].hand.remove(card)
+                                            break
+                            
+                            # Add meld to melds
+                            server.players[0].melds.append(compose(meld))
+                            
+                            # Refresh display
+                            os.system('clear')
+                            host_display(server)
+                    
+                    challengers.append(0)
+                
+                # Client called Draw
+                else:
+                    print()
+                    
+                    # Prompt to challenge or fold.
+                    if server.players[0].melds:
+                        print('c: Challenge')
+                    
+                    print('f: Fold')
+                    
+                    choice = input('\n> ')
+                    while (choice != 'c' and choice != 'f') or (choice == 'c' and not server.players[0].melds):
+                        print('\nInvalid input')
+                        choice = input('\n> ')
+                    
+                    if choice == 'c':
+                        # Challenge: await host's hand
+                        choice = ''
+                        while choice != 's':
+                            print()
+                            
+                            # If host has any melds to expose
+                            if can_expose_meld := find_meld(decompose(server.players[0].hand)):
+                                print('0: Prepare a meld')
+                            else:
+                                print('s: Submit your hand')
+                            
+                            choice = input('\n> ')
+                            
+                            while (choice != '0' and choice != 's') or (choice == '0' and not can_expose_meld) or (choice == 's' and can_expose_meld):
+                                print('\nInvalid input')
+                                choice = input('\n> ')
+                            
+                            if choice == '0':
+                                # Display hand
+                                server.players[0].hand.sort(key=lambda x: x.suit)
+                                server.players[0].hand.sort(key=lambda x: Constants().RANKS.index(x.rank))
+                                print(f'{server.players[0].hand[0].rank.rjust(2)}{server.players[0].hand[0].suit}', end='')
+                                for i in range(1, len(server.players[0].hand)):
+                                    print(f' {server.players[0].hand[i].rank.rjust(2)}{server.players[0].hand[i].suit}', end='')
+                                print()
+                                
+                                # Display enumeration for card select
+                                print('  0', end='')
+                                for i in range(1, len(server.players[0].hand)):
+                                    print(f' {str(i).rjust(3)}', end='')
+                                print()
+                                
+                                print('\nChoose which cards you wish to meld (space-separated list of numbers)')
+                                
+                                choices = input('\n> ')
+                                
+                                # Error check input
+                                while not all(card.isnumeric() and int(card) < len(server.players[0].hand) for card in choices.split()) or not verify_meld(decompose([server.players[0].hand[int(num)] for num in choices.split()])):
+                                    print('\nInvalid input')
+                                    choices = input('\n> ')
+                                
+                                meld = decompose([server.players[0].hand[int(num)] for num in choices.split()])
+                                
+                                # Removes melded cards from hand
+                                for meld_card in meld:
+                                    if meld_card in decompose(server.players[0].hand):
+                                        for card in server.players[0].hand:
+                                            if card.rank == meld_card[0] and card.suit == meld_card[1]:
+                                                server.players[0].hand.remove(card)
+                                                break
+                                
+                                # Add meld to melds
+                                server.players[0].melds.append(compose(meld))
+                                
+                                # Refresh display
+                                os.system('clear')
+                                host_display(server)
+                        
+                        challengers.append(0)
+                    
+                # 2. Await hand(s)
+                for i in range(1, len(server.players)):
+                    message = await get_message(ret_val[i-1][0])
+                    
+                    if 'draw_response' in message:
+                        if message['draw_response'] == 'challenge':
+                            challengers.append(i)
+                            
+                            if 'melds' in message:
+                                for meld in message['melds']:
+                                    # Remove cards from player's hand
+                                    for meld_card in meld:
+                                        if meld_card in decompose(server.players[server.order[0]].hand):
+                                            for card in server.players[server.order[0]].hand:
+                                                if card.rank == meld_card[0] and card.suit == meld_card[1]:
+                                                    server.players[server.order[0]].hand.remove(card)
+                                                    break
+                                    
+                                    # Add meld to player's melds
+                                    server.players[server.order[0]].melds.append(compose(message['cards']))
+                
+                # 3. Tally up the points.
+                results = [(i, sum((card.points for card in server.players[i].hand))) for i in challengers]
+                
+                # 4. Compute the lowest score and filter out players with a higher score.
+                top_score = min((r[1] for r in results))
+                top_challengers = [r for r in results if r[1] == top_score]
+                
+                # 5. Break ties...
+                if len(top_challengers) > 1:
+                    if (server.last_draw, top_score) in top_challengers:
+                        # Remove who called Draw from list of potential winners
+                        top_challengers.remove((server.last_draw, top_score))
+                        
+                        if len(top_challengers) > 1:
+                            winner = server.order[1]
+                        else:
+                            winner = top_challengers[0][0]
+                    
+                    else:
+                        winner = server.order[1]
+                
+                # ...or simply declare the sole winner!
+                else:
+                    winner = top_challengers[0][0]
+                
+                # 6. Award the winner!
+                server.players[winner].score += 1
+                print(f'{server.players[winner].name} won (id={winner})!\n')
+            
+            else:
+                server.players[winner].score += 1
+                print(f'{server.players[winner].name} won (id={winner})!\n')
+            
+            # Send final gamestate
+            await send_gamestate(ret_val, server, winner)
+            
+            # Display final gamestate
             os.system('clear')
             host_display(server)
             
@@ -829,7 +1107,7 @@ async def main(state_info):
                 
                 # Get player's choice
                 choice = input('\n> ')
-                while not choice.isnumeric() or int(choice) > 2 or (int(choice) == 1 and not can_pick_discard):
+                while not choice.isnumeric() or int(choice) > 2 or (int(choice) == 1 and not can_pick_discard) or (int(choice) == 2 and not players[gamestate['id']]['can_draw']):
                     print('\nInvalid input')
                     choice = input('\n> ')
                 
@@ -868,8 +1146,7 @@ async def main(state_info):
                     await send_message(ret_val[1], {'command': 'pick_discard', 'cards': meld})
                 
                 elif choice == '2':
-                    # TODO: Implement draw
-                    pass
+                    await send_message(ret_val[1], {'command': 'draw'})
                 
                 while gamestate['order'][0] == gamestate['id']:
                     # Await gamestate
@@ -1051,10 +1328,231 @@ async def main(state_info):
                         break
             
             # Client game ended ############################
-            if winner != -2:
-                print(f'{players[gamestate["winner"]]["name"]} won (id={gamestate["winner"]})!')
+            
+            # If winner == -2, then the deck was exhausted.
+            # If winner == -3, then server.order[0] called Draw.
+            # Otherwise, winner is the winner.
+            
+            if gamestate['winner'] == -2:
+                if players[gamestate['id']]['melds']:
+                    melds = list()
+                    
+                    # Await hand.
+                    choice = ''
+                    while choice != 's':
+                        print()
+                        
+                        # If you have any melds to expose
+                        if can_expose_meld := find_meld(players[gamestate['id']]['hand']):
+                            print('0: Prepare a meld')
+                        else:
+                            print('s: Submit your hand')
+                        
+                        choice = input('\n> ')
+                        
+                        while (choice != '0' and choice != 's') or (choice == '0' and not can_expose_meld) or (choice == 's' and can_expose_meld):
+                            print('\nInvalid input')
+                            choice = input('\n> ')
+                        
+                        if choice == '0':
+                            # Display hand
+                            players[gamestate['id']]['hand'].sort(key=lambda x: x[1])
+                            players[gamestate['id']]['hand'].sort(key=lambda x: Constants().RANKS.index(x[0]))
+                            print(f'{players[gamestate["id"]]["hand"][0][0].rjust(2)}{players[gamestate["id"]]["hand"][0][1]}', end='')
+                            for i in range(1, len(players[gamestate["id"]]["hand"])):
+                                print(f' {players[gamestate["id"]]["hand"][i][0].rjust(2)}{players[gamestate["id"]]["hand"][i][1]}', end='')
+                            print()
+                            
+                            # Display enumeration for card select
+                            print('  0', end='')
+                            for i in range(1, len(players[gamestate['id']]['hand'])):
+                                print(f' {str(i).rjust(3)}', end='')
+                            print()
+                            
+                            print('\nChoose which cards you wish to meld (space-separated list of numbers)')
+                            
+                            choices = input('\n> ')
+                            
+                            while not all(choice.isnumeric() and int(choice) < len(players[gamestate['id']]['hand']) for choice in choices.split()) or not verify_meld([players[gamestate['id']]['hand'][int(num)] for num in choices.split()]):
+                                print('\nInvalid input')
+                                choices = input('\n> ')
+                            
+                            meld = [players[gamestate['id']]['hand'][int(num)] for num in choices.split()]
+                            
+                            melds.append(meld)
+                            
+                            # Remove cards from player's hand
+                            for meld_card in meld:
+                                players[gamestate['id']]['hand'].remove(meld_card)
+                            
+                            # Add meld to player's melds
+                            players[gamestate['id']]['melds'].append(meld)
+                            
+                            # Refresh display
+                            os.system('clear')
+                            client_display(gamestate, players)
+                    
+                    # Send melds to host
+                    await send_message(ret_val[1], {'melds': melds})
+            
+            elif gamestate['winner'] == -3:
+                # Draw procedure
+                # 
+                # 1. Check if you called Draw. If so, await your hand. If not, prompt to challenge or fold.
+                
+                # You called Draw
+                if gamestate['order'][0] == gamestate['id']:
+                    melds = list()
+                    
+                    # Await your hand.
+                    choice = ''
+                    while choice != 's':
+                        print()
+                        
+                        # If you have any melds to expose
+                        if can_expose_meld := find_meld(players[gamestate['id']]['hand']):
+                            print('0: Prepare a meld')
+                        else:
+                            print('s: Submit your hand')
+                        
+                        choice = input('\n> ')
+                        
+                        while (choice != '0' and choice != 's') or (choice == '0' and not can_expose_meld) or (choice == 's' and can_expose_meld):
+                            print('\nInvalid input')
+                            choice = input('\n> ')
+                        
+                        if choice == '0':
+                            # Display hand
+                            players[gamestate['id']]['hand'].sort(key=lambda x: x[1])
+                            players[gamestate['id']]['hand'].sort(key=lambda x: Constants().RANKS.index(x[0]))
+                            print(f'{players[gamestate["id"]]["hand"][0][0].rjust(2)}{players[gamestate["id"]]["hand"][0][1]}', end='')
+                            for i in range(1, len(players[gamestate["id"]]["hand"])):
+                                print(f' {players[gamestate["id"]]["hand"][i][0].rjust(2)}{players[gamestate["id"]]["hand"][i][1]}', end='')
+                            print()
+                            
+                            # Display enumeration for card select
+                            print('  0', end='')
+                            for i in range(1, len(players[gamestate['id']]['hand'])):
+                                print(f' {str(i).rjust(3)}', end='')
+                            print()
+                            
+                            print('\nChoose which cards you wish to meld (space-separated list of numbers)')
+                            
+                            choices = input('\n> ')
+                            
+                            while not all(choice.isnumeric() and int(choice) < len(players[gamestate['id']]['hand']) for choice in choices.split()) or not verify_meld([players[gamestate['id']]['hand'][int(num)] for num in choices.split()]):
+                                print('\nInvalid input')
+                                choices = input('\n> ')
+                            
+                            meld = [players[gamestate['id']]['hand'][int(num)] for num in choices.split()]
+                            
+                            melds.append(meld)
+                            
+                            # Remove cards from player's hand
+                            for meld_card in meld:
+                                players[gamestate['id']]['hand'].remove(meld_card)
+                            
+                            # Add meld to player's melds
+                            players[gamestate['id']]['melds'].append(meld)
+                            
+                            # Refresh display
+                            os.system('clear')
+                            client_display(gamestate, players)
+                    
+                    # Obv ur not challenging cuz u called the Draw, but host doesn't know that, so this is a little hack
+                    await send_message(ret_val[1], {'draw_response': 'challenge', 'melds': melds})
+                
+                # Someone else called Draw
+                else:
+                    print()
+                    
+                    # Prompt to challenge or fold.
+                    if players[gamestate['id']]['melds']:
+                        print('c: Challenge')
+                    
+                    print('f: Fold')
+                    
+                    choice = input('\n> ')
+                    while (choice != 'c' and choice != 'f') or (choice == 'c' and not players[gamestate['id']]['melds']):
+                        print('\nInvalid input')
+                        choice = input('\n> ')
+                    
+                    if choice == 'f':
+                        await send_message(ret_val[1], {'draw_response': 'fold'})
+                    
+                    elif choice == 'c':
+                        # Challenge: await host's hand
+                        choice = ''
+                        while choice != 's':
+                            print()
+                            
+                            # If you have any melds to expose
+                            if can_expose_meld := find_meld(players[gamestate['id']]['hand']):
+                                print('0: Prepare a meld')
+                            else:
+                                print('s: Submit your hand')
+                            
+                            choice = input('\n> ')
+                            
+                            while (choice != '0' and choice != 's') or (choice == '0' and not can_expose_meld) or (choice == 's' and can_expose_meld):
+                                print('\nInvalid input')
+                                choice = input('\n> ')
+                            
+                            if choice == '0':
+                                # Display hand
+                                players[gamestate['id']]['hand'].sort(key=lambda x: x[1])
+                                players[gamestate['id']]['hand'].sort(key=lambda x: Constants().RANKS.index(x[0]))
+                                print(f'{players[gamestate["id"]]["hand"][0][0].rjust(2)}{players[gamestate["id"]]["hand"][0][1]}', end='')
+                                for i in range(1, len(players[gamestate["id"]]["hand"])):
+                                    print(f' {players[gamestate["id"]]["hand"][i][0].rjust(2)}{players[gamestate["id"]]["hand"][i][1]}', end='')
+                                print()
+                                
+                                # Display enumeration for card select
+                                print('  0', end='')
+                                for i in range(1, len(players[gamestate['id']]['hand'])):
+                                    print(f' {str(i).rjust(3)}', end='')
+                                print()
+                                
+                                print('\nChoose which cards you wish to meld (space-separated list of numbers)')
+                                
+                                choices = input('\n> ')
+                                
+                                while not all(choice.isnumeric() and int(choice) < len(players[gamestate['id']]['hand']) for choice in choices.split()) or not verify_meld([players[gamestate['id']]['hand'][int(num)] for num in choices.split()]):
+                                    print('\nInvalid input')
+                                    choices = input('\n> ')
+                                
+                                meld = [players[gamestate['id']]['hand'][int(num)] for num in choices.split()]
+                                
+                                melds.append(meld)
+                                
+                                # Remove cards from player's hand
+                                for meld_card in meld:
+                                    players[gamestate['id']]['hand'].remove(meld_card)
+                                
+                                # Add meld to player's melds
+                                players[gamestate['id']]['melds'].append(meld)
+                                
+                                # Refresh display
+                                os.system('clear')
+                                client_display(gamestate, players)
+                    
+                        await send_message(ret_val[1], {'draw_response': 'challenge', 'melds': melds})
+            
+            # Await final gamestate
+            gamestate = await get_message(ret_val[0])
+            
+            # Get final player info
+            players = [await get_message(ret_val[0]) for _ in range(0, len(gamestate['order']))]
+            
+            # Display game state
+            os.system('clear')
+            client_display(gamestate, players)
+            
+            if gamestate['winner'] == -2:
+                print('Nobody exposed a meld; nobody wins.\n')
+            
             else:
-                print('Nobody won. Y\'all suk.')
+                print(f'{players[gamestate["winner"]]["name"]} won (id={gamestate["winner"]})!\n')
             
             # Send rematch response
             print('Rematch? Enter \'q\' to not rematch.')

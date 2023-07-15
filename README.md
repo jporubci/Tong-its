@@ -2,5 +2,6 @@
 
 TODO:
 
-* Implement Draw
-* Fix drawing when option not presented
+* Find bugs
+* List bugs in README
+* Fix bugs
