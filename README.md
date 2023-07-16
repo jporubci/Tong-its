@@ -19,7 +19,6 @@ Note, this has not been tested. Furthermore, the shebang and corresponding pytho
 
 1. Download this repository's ZIP.
 1. Extract the ZIP to a desirable destination.
-1. Optional: The extracted ZIP will be a folder that holds this respository's contents in a folder with the same name as this repository. Since you only need one top-level folder to hold this repository's contents, you can move the repository's folder to the directory where you extracted the ZIP. This should replace the repository folder being nested in the extracted ZIP folder with just the repository folder, leaving you with one top-level folder holding the precious contents. Clean.
 1. Move the ZIP to the trash.
 
 
