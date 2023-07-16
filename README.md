@@ -1,10 +1,7 @@
 # Dependencies:
-The easiest way to play is to install on the student machines with ssh.
-
-If you want to install it elsewhere, you'll need to make sure you have all the necessary programs and modules.
+The easiest way to play is to install on the student machines with ssh. Alternatively, you can download the ZIP to play; just make sure you have Python 3.11 installed at least.
 
 * Python 3.11 (tested on 3.11.2)
-* Some Python modules
 
 
 # How to Install:
@@ -15,8 +12,6 @@ If you want to install it elsewhere, you'll need to make sure you have all the n
 
 
 ## On macOS with ZIP:
-Note, this has not been tested. Furthermore, the shebang and corresponding python3 path might not be correct if installed this way.
-
 1. Download this repository's ZIP.
 1. Extract the ZIP to a desirable destination.
 1. Move the ZIP to the trash.
@@ -44,7 +39,7 @@ A `run` of cards (in this game) is 3 to 13 cards of the same suit and consecutiv
 
 A `meld` is a set or run of cards, as defined for this game.
 
-`Draw` is an action that a player may perform. This is not to be confused with drawing a card. This term will typically be used in the phrase `call a draw` so as to avoid confusion. You should call a draw if you believe that the unmelded cards in your hand sum up to the least number of points among the players with at least one exposed meld.
+`Draw` is an action that a player may perform. This is not to be confused with drawing a card. This term will typically be used in the phrase "call a draw" so as to avoid confusion. You should call a draw if you believe that the unmelded cards in your hand sum up to the least number of points among the players with at least one exposed meld.
 
 `Challenge` and `fold` are actions that a player may perform in response to a draw.
 
