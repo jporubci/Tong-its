@@ -1,4 +1,4 @@
-#Dependencies:
+# Dependencies:
 The easiest way to play is to install on the student machines with ssh.
 
 If you want to install it elsewhere, you'll need to make sure you have all the necessary programs and modules.
@@ -7,14 +7,14 @@ If you want to install it elsewhere, you'll need to make sure you have all the n
 * Some Python modules
 
 
-#How to Install:
-##On macOS with SSH:
+# How to Install:
+## On macOS with SSH:
 1. ssh into a student machine.
 1. Navigate to a desirable directory to clone this repository.
 1. Enter `git clone git@github.com:jporubci/Tong-its.git`.
 
 
-##On macOS with ZIP:
+## On macOS with ZIP:
 Note, this has not been tested. Furthermore, the shebang and corresponding python3 path might not be correct if installed this way.
 
 1. Download this repository's ZIP.
@@ -23,20 +23,20 @@ Note, this has not been tested. Furthermore, the shebang and corresponding pytho
 1. Move the ZIP to the trash.
 
 
-##On Windows:
+## On Windows:
 This game was not designed for Windows and it won't display properly because I only use `os.system('clear')`, not `os.system('cls')`, and I don't check for the operating system type, but it should still be theoretically playable. That said, i forgor how to even ssh on windows, i'd prob use PuTTY and try to generally follow the installation instructions for macOS, remembering that slashes are sometimes backwards on windows. if installing with the ZIP, then it should be p much the same as with macOS.
 
 
-#How to Run:
+# How to Run:
 1. Change your working directory to this repository's directory, wherever you installed it.
 1. Enter `python3 tong-its.py`.
 
 
-#What is Tong-its?
+# What is Tong-its?
 Tong-its is a turn-based 3-player card game that uses the standard 52-card deck of French-suited playing cards. Aces are low cards worth 1 point. Jacks, Queens, and Kings are worth 10 points. All other cards are worth the same number of points as their rank. Tong-its is about creating completed sets or runs of cards, and making strategic decisions that favor the odds.
 
 
-#How to Play:
+# How to Play:
 First, some definitions.
 
 A `set` of cards (in this game) is 3 or 4 cards of the same rank; in other words, 3 or 4 of a kind. Rank is distinct from point value. 10s, Jacks, Queens, and Kings all share the same point value (10) but are not considered the same rank.
@@ -68,7 +68,7 @@ A `meld` is a set or run of cards, as defined for this game.
 1. When a draw is called, players may choose to either challenge or fold. You must have exposed at least one meld in order to challenge a draw. If you fold, you lose. If you challenge, the procedure is similar to when the deck is exhausted. Determine the value of your hand and compare it. The player that called the draw wins if their hand is worth the fewest points. In the case of a tie, the player that called the draw loses. If there is a tie between two challengers, the player whose turn it would have been next wins.
 
 
-#How to Play Tips:
+# How to Play Tips:
 * Try to expose at least one meld. You cannot win without exposing at least one meld unless you manage to lay off your entire hand onto other players' melds, but good luck doing that.
 * You can lay off a card on another player's meld to prevent them from calling a draw during their upcoming turn.
 * Don't always expose a meld if you have one. If someone calls a draw or the deck is exhausted, you can always meld cards in your hand at the end to lower the value of your hand. Exposing a meld allows other players to lay off cards from their hand. Expose a meld if you can get rid if all the cards from your hand or if you would greatly benefit from someone laying off a card onto your meld. For example, if you have an 8, 9, 10, Queen, and King of the same suit, but not the Jack, you could expose the 8, 9, and 10 in hopes of someone laying off the Jack to enable you to lay off your Queen and King. Beware however that this could allow someone to lay off a 7 or more onto your meld. Ideally, the 7 would be in the discard, and not on the top of it.
@@ -77,7 +77,7 @@ A `meld` is a set or run of cards, as defined for this game.
 * Have fun!
 
 
-#TODO:
+# TODO:
 
 * Implement message authentication so that users may only receive messages from other users that are logged-in to the student machines.
 * Implement the scoring mechanism with betting and a pot so there is a reason to fold.
@@ -85,7 +85,7 @@ A `meld` is a set or run of cards, as defined for this game.
 * ~~Write installation instructions for Windows users lol.~~
 
 
-#Potential Ideas:
+# Potential Ideas:
 
 * Give users the option to create custom color themes for displayed text.
 * Add a sound notification to inform host when a client player joins the lobby.
@@ -97,7 +97,7 @@ A `meld` is a set or run of cards, as defined for this game.
 * Log game history for in-game and/or post-game review.
 
 
-#Rejected Ideas:
+# Rejected Ideas:
 
 * Implement any chat.
 * Record any user's statistics such as their number of wins and losses.
