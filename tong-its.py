@@ -1008,12 +1008,8 @@ async def main(state_info):
                 else:
                     winner = top_challengers[0][0]
             
-            # Print winner
             if winner != -2:
                 server.players[winner].score += 1
-                print(f'{server.players[winner].name} won (id={winner})!\n')
-            else:
-                print('Nobody exposed a meld; nobody wins.\n')
             
             # Send final gamestate
             await send_gamestate(ret_val, server, winner)
@@ -1021,6 +1017,12 @@ async def main(state_info):
             # Display final gamestate
             os.system('clear')
             host_display(server)
+            
+            # Print winner
+            if winner != -2:
+                print(f'{server.players[winner].name} won (id={winner})!\n')
+            else:
+                print('Nobody exposed a meld; nobody wins.\n')
             
             # Ask host if they want to host again with same players
             print('Rematch? Enter \'q\' to not rematch.')
