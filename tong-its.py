@@ -225,7 +225,7 @@ async def main(state_info):
                 host_display(server)
                 
                 # Wait until it's your turn
-                while server.order[0] != 0:
+                while server.order[0] != 0 and winner == -1:
                     print(f'{server.players[server.order[0]].name}\'s turn...')
                     
                     # Wait for client player to send action
@@ -471,7 +471,7 @@ async def main(state_info):
                     break
                 
                 # Expose/Lay off/Draw loop
-                while server.order[0] == 0:
+                while server.order[0] == 0 and not server.end:
                     # Send gamestate
                     await send_gamestate(ret_val, server, winner)
                     
@@ -650,7 +650,6 @@ async def main(state_info):
                             server.end = True
                             break
                     
-                    
                     elif choice == 'd':
                         # Display hand
                         server.players[0].hand.sort(key=lambda x: x.suit)
@@ -782,20 +781,23 @@ async def main(state_info):
                     
                     # 3. Await candidates to submit any melds before submitting their hands.
                     for i in candidates:
+                        if i == 0:
+                            continue
+                        
                         message = await get_message(ret_val[i-1][0])
                         
                         if 'melds' in message:
                             for meld in message['melds']:
                                 # Remove cards from player's hand
                                 for meld_card in meld:
-                                    if meld_card in decompose(server.players[server.order[0]].hand):
-                                        for card in server.players[server.order[0]].hand:
+                                    if meld_card in decompose(server.players[i].hand):
+                                        for card in server.players[i].hand:
                                             if card.rank == meld_card[0] and card.suit == meld_card[1]:
-                                                server.players[server.order[0]].hand.remove(card)
+                                                server.players[i].hand.remove(card)
                                                 break
                                 
                                 # Add meld to player's melds
-                                server.players[server.order[0]].melds.append(compose(message['cards']))
+                                server.players[i].melds.append(compose(meld))
                     
                     # 4. Tally up the points.
                     results = [(i, sum((card.points for card in server.players[i].hand))) for i in candidates]
@@ -814,10 +816,6 @@ async def main(state_info):
                     # ...or simply declare the sole winner!
                     else:
                         winner = top_candidates[0][0]
-                    
-                    # 7. Award the winner!
-                    server.players[winner].score += 1
-                    print(f'{server.players[winner].name} won (id={winner})!\n')
             
             elif winner == -3:
                 # Draw procedure
@@ -826,7 +824,7 @@ async def main(state_info):
                 challengers = list()
                 
                 # Host called Draw
-                if server.order[0] = 0:
+                if server.order[0] == 0:
                     
                     # Await their hand.
                     choice = ''
@@ -890,8 +888,6 @@ async def main(state_info):
                 
                 # Client called Draw
                 else:
-                    print()
-                    
                     # Prompt to challenge or fold.
                     if server.players[0].melds:
                         print('c: Challenge')
@@ -966,24 +962,26 @@ async def main(state_info):
                     
                 # 2. Await hand(s)
                 for i in range(1, len(server.players)):
+                    if i == 0:
+                        continue
+                    
                     message = await get_message(ret_val[i-1][0])
                     
-                    if 'draw_response' in message:
-                        if message['draw_response'] == 'challenge':
-                            challengers.append(i)
-                            
-                            if 'melds' in message:
-                                for meld in message['melds']:
-                                    # Remove cards from player's hand
-                                    for meld_card in meld:
-                                        if meld_card in decompose(server.players[server.order[0]].hand):
-                                            for card in server.players[server.order[0]].hand:
-                                                if card.rank == meld_card[0] and card.suit == meld_card[1]:
-                                                    server.players[server.order[0]].hand.remove(card)
-                                                    break
-                                    
-                                    # Add meld to player's melds
-                                    server.players[server.order[0]].melds.append(compose(message['cards']))
+                    if 'draw_response' in message and message['draw_response'] == 'challenge':
+                        challengers.append(i)
+                        
+                        if 'melds' in message:
+                            for meld in message['melds']:
+                                # Remove cards from player's hand
+                                for meld_card in meld:
+                                    if meld_card in decompose(server.players[i].hand):
+                                        for card in server.players[i].hand:
+                                            if card.rank == meld_card[0] and card.suit == meld_card[1]:
+                                                server.players[i].hand.remove(card)
+                                                break
+                                
+                                # Add meld to player's melds
+                                server.players[i].melds.append(compose(meld))
                 
                 # 3. Tally up the points.
                 results = [(i, sum((card.points for card in server.players[i].hand))) for i in challengers]
@@ -1009,14 +1007,6 @@ async def main(state_info):
                 # ...or simply declare the sole winner!
                 else:
                     winner = top_challengers[0][0]
-                
-                # 6. Award the winner!
-                server.players[winner].score += 1
-                print(f'{server.players[winner].name} won (id={winner})!\n')
-            
-            else:
-                server.players[winner].score += 1
-                print(f'{server.players[winner].name} won (id={winner})!\n')
             
             # Send final gamestate
             await send_gamestate(ret_val, server, winner)
@@ -1024,6 +1014,11 @@ async def main(state_info):
             # Display final gamestate
             os.system('clear')
             host_display(server)
+            
+            # Print winner
+            if winner != -2:
+                server.players[winner].score += 1
+                print(f'{server.players[winner].name} won (id={winner})!\n')
             
             # Ask host if they want to host again with same players
             print('Rematch? Enter \'q\' to not rematch.')
@@ -1059,8 +1054,11 @@ async def main(state_info):
         # Game lobby loop
         while True:
             
+            # Hack to set gamestate winner to -1
+            gamestate = {'winner': -1}
+            
             # Gameplay loop
-            while True:
+            while gamestate['winner'] == -1:
                 
                 # Await gamestate
                 gamestate = await get_message(ret_val[0])
@@ -1071,9 +1069,6 @@ async def main(state_info):
                 # Display game state
                 os.system('clear')
                 client_display(gamestate, players)
-                
-                if gamestate['winner'] != -1:
-                    break
                 
                 # Wait until it's your turn
                 while gamestate['order'][0] != gamestate['id'] and gamestate['winner'] == -1:
@@ -1464,8 +1459,6 @@ async def main(state_info):
                 
                 # Someone else called Draw
                 else:
-                    print()
-                    
                     # Prompt to challenge or fold.
                     if players[gamestate['id']]['melds']:
                         print('c: Challenge')
@@ -1481,6 +1474,8 @@ async def main(state_info):
                         await send_message(ret_val[1], {'draw_response': 'fold'})
                     
                     elif choice == 'c':
+                        melds = list()
+                        
                         # Challenge: await host's hand
                         choice = ''
                         while choice != 's':
