@@ -645,7 +645,7 @@ async def main(state_info):
                         
                         # Disable player whose meld got added to from calling draw
                         server.players[message['player_id']].can_draw = False
-                        if message['played_id'] == 0:
+                        if message['player_id'] == 0:
                             sabotage = True
                         
                         # Disable player from calling draw
