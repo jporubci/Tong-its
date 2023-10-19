@@ -216,7 +216,7 @@ async def main(state_info):
             
             # Play a turn
             while not server.end:
-                
+                sabotage = False
                 # Send gamestate
                 await send_gamestate(ret_val, server, winner)
                 
@@ -304,6 +304,8 @@ async def main(state_info):
                         
                         # Disable player whose meld got added to from calling draw
                         server.players[message['player_id']].can_draw = False
+                        if message['player_id'] == server.order[0]:
+                            sabotage = True
                         
                         # Disable player from calling draw
                         server.players[server.order[0]].can_draw = False
@@ -324,7 +326,7 @@ async def main(state_info):
                         server.discard += compose([message['card']])
                         
                         # Enable player to call draw if they have an exposed meld
-                        if server.players[server.order[0]].melds:
+                        if server.players[server.order[0]].melds and not sabotage:
                             server.players[server.order[0]].can_draw = True
                         
                         # Check if game is over
@@ -380,6 +382,9 @@ async def main(state_info):
                 
                 # Bool to remember whether pick discard is valid
                 can_pick_discard = False
+                
+                # Bool to remember if you sabotaged urself by laying off on ur own meld so now u cant actually call a draw next turn.
+                sabotage = False
                 
                 # Display option to pick up from deck
                 print('0: Pick up a card from the top of the deck')
@@ -640,6 +645,8 @@ async def main(state_info):
                         
                         # Disable player whose meld got added to from calling draw
                         server.players[message['player_id']].can_draw = False
+                        if message['played_id'] == 0:
+                            sabotage = True
                         
                         # Disable player from calling draw
                         server.players[server.order[0]].can_draw = False
@@ -678,7 +685,7 @@ async def main(state_info):
                         server.discard.append(server.players[0].hand.pop(int(choice)))
                         
                         # Enable you to call draw if they have an exposed meld
-                        if server.players[0].melds:
+                        if server.players[0].melds and not sabotage:
                             server.players[0].can_draw = True
                         
                         # Check if game is over
