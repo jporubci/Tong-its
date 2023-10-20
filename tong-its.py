@@ -216,7 +216,6 @@ async def main(state_info):
             
             # Play a turn
             while not server.end:
-                sabotage = False
                 # Send gamestate
                 await send_gamestate(ret_val, server, winner)
                 
@@ -226,6 +225,7 @@ async def main(state_info):
                 
                 # Wait until it's your turn
                 while server.order[0] != 0 and winner == -1:
+                    sabotage = False
                     print(f'{server.players[server.order[0]].name}\'s turn...')
                     
                     # Wait for client player to send action
@@ -328,6 +328,7 @@ async def main(state_info):
                         # Enable player to call draw if they have an exposed meld
                         if server.players[server.order[0]].melds and not sabotage:
                             server.players[server.order[0]].can_draw = True
+                        sabotage = False
                         
                         # Check if game is over
                         if not server.players[server.order[0]].hand:
@@ -687,6 +688,7 @@ async def main(state_info):
                         # Enable you to call draw if they have an exposed meld
                         if server.players[0].melds and not sabotage:
                             server.players[0].can_draw = True
+                        sabotage = False
                         
                         # Check if game is over
                         if not server.players[0].hand:
